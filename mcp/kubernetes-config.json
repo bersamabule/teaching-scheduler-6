@@ -1,0 +1,63 @@
+{
+  "mcpServers": {
+    "kubernetes": {
+      "command": "npx",
+      "args": ["mcp-server-kubernetes"],
+      "env": {
+        "KUBECONFIG": "${project_root}/k8s/kubeconfig.yaml",
+        "NAMESPACE": "teaching-scheduler",
+        "MCP_PORT": "3003"
+      }
+    }
+  },
+  "kubernetesConfig": {
+    "namespace": "teaching-scheduler",
+    "deployment": {
+      "name": "teaching-scheduler",
+      "manifestFile": "${project_root}/k8s/deployment.yaml"
+    },
+    "configMap": {
+      "name": "teaching-scheduler-config",
+      "manifestFile": "${project_root}/k8s/configmap.yaml"
+    },
+    "secrets": [
+      {
+        "name": "teaching-scheduler-secrets",
+        "manifestFile": "${project_root}/k8s/secrets.yaml"
+      }
+    ],
+    "service": {
+      "name": "teaching-scheduler",
+      "manifestFile": "${project_root}/k8s/deployment.yaml"
+    },
+    "ingress": {
+      "name": "teaching-scheduler",
+      "manifestFile": "${project_root}/k8s/deployment.yaml"
+    },
+    "hpa": {
+      "name": "teaching-scheduler",
+      "manifestFile": "${project_root}/k8s/hpa.yaml"
+    },
+    "allowedOperations": [
+      "get-deployments",
+      "get-pods",
+      "get-services",
+      "describe-pod",
+      "pod-logs",
+      "apply-manifest",
+      "scale-deployment",
+      "restart-deployment",
+      "get-events"
+    ],
+    "monitoring": {
+      "enabled": true,
+      "metricsServer": true,
+      "podMetrics": true
+    },
+    "rollback": {
+      "enabled": true,
+      "maxRevisionHistory": 10,
+      "automaticRollbackOnFailure": true
+    }
+  }
+} 

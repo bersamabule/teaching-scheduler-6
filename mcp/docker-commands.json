@@ -1,0 +1,48 @@
+{
+  "commands": {
+    "start-dev": {
+      "description": "Start the development environment with Docker Compose",
+      "command": "cd {project_root} && docker-compose -f docker/docker-compose.yml up -d",
+      "allowedArgs": []
+    },
+    "stop-dev": {
+      "description": "Stop the development environment",
+      "command": "cd {project_root} && docker-compose -f docker/docker-compose.yml down",
+      "allowedArgs": []
+    },
+    "logs": {
+      "description": "View logs from a specific service",
+      "command": "cd {project_root} && docker-compose -f docker/docker-compose.yml logs --tail=100 -f",
+      "allowedArgs": ["app", "mcp-console", "mcp-docker"]
+    },
+    "rebuild": {
+      "description": "Rebuild a specific service",
+      "command": "cd {project_root} && docker-compose -f docker/docker-compose.yml build",
+      "allowedArgs": ["app", "mcp-console", "mcp-docker"]
+    },
+    "deploy-prod": {
+      "description": "Deploy to production using Docker Compose",
+      "command": "cd {project_root} && ./scripts/docker-deploy.sh {args}",
+      "allowedArgs": ["latest", "production", "staging"]
+    },
+    "cleanup": {
+      "description": "Clean up Docker resources",
+      "command": "cd {project_root} && ./scripts/docker-cleanup.sh {args}",
+      "allowedArgs": ["production", "staging", "--prune", "--prune-volumes"]
+    },
+    "ps": {
+      "description": "List running containers",
+      "command": "cd {project_root} && docker-compose -f docker/docker-compose.yml ps",
+      "allowedArgs": []
+    },
+    "exec": {
+      "description": "Execute a command in a running container",
+      "command": "cd {project_root} && docker-compose -f docker/docker-compose.yml exec {service} {command}",
+      "allowedArgs": ["app", "mcp-console", "mcp-docker"],
+      "paramDescription": {
+        "service": "The service to execute the command in (app, mcp-console, mcp-docker)",
+        "command": "The command to execute (bash, sh, npm, node, etc.)"
+      }
+    }
+  }
+} 

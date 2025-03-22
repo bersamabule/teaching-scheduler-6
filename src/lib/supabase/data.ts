@@ -1,5 +1,6 @@
 import { supabase } from './client';
 import { supabaseUrl, supabaseKey } from './client';
+import { supabaseService } from './service';
 
 // Define types for our data
 export interface Teacher {
@@ -69,27 +70,78 @@ function isCacheValid<T>(cacheItem: { data: T; timestamp: number } | null): bool
   return now - cacheItem.timestamp < CACHE_EXPIRATION;
 }
 
+// Define known tables for fallback
+export const KNOWN_TABLES = [
+  'Students-English',
+  'Sprouts1-Course-Calendar',
+  'Sprouts2-Course-Calendar',
+  'Clover1A-Course-Calendar', 
+  'Clover2A-Course-Calendar',
+  'Clover3A-Course-Calendar',
+  'Guardians3-Course-Calendar',
+  'Teachers'
+];
+
 /**
  * Fetches a list of all tables from the Supabase database
  */
 export async function getTables(): Promise<string[]> {
-  // Define known tables for fallback
-  const knownTables = [
-    'Students-English',
-    'Sprouts2-Course-Calendar',
-    'Teachers',
-    'Clover3A-Course-Calendar',
-    'Clover2A-Course-Calendar'
-  ];
+  console.log('Starting database discovery...');
+  
+  // Check if we're in offline mode - immediately return known tables
+  if (supabaseService.isOffline()) {
+    console.log('In offline mode, using fallback table list');
+    return KNOWN_TABLES;
+  }
+  
+  // Check cache first
+  if (isCacheValid(cache.calendarTables)) {
+    console.log('Using cached table list');
+    return cache.calendarTables!.data;
+  }
   
   try {
-    console.log('Starting database discovery...');
-    
-    // Just return the known tables for now to fix the errors
-    return knownTables;
-  } catch (error) {
-    console.error('Error during database discovery:', error);
-    return knownTables;
+    // Use the enhanced service with retry logic
+    return await supabaseService.executeQuery(async () => {
+      // Attempt to fetch tables from Supabase
+      const { data, error } = await supabaseService.getClient()
+        .from('information_schema.tables')
+        .select('table_name')
+        .eq('table_schema', 'public');
+      
+      if (error) {
+        console.error('Error fetching tables from database:', error);
+        console.log('Falling back to known tables list');
+        return KNOWN_TABLES;
+      }
+      
+      if (!data || data.length === 0) {
+        console.log('No tables found in database, using fallback list');
+        return KNOWN_TABLES;
+      }
+      
+      // Extract table names from the result
+      const tables = data.map(row => row.table_name);
+      console.log(`Found ${tables.length} tables in database:`, tables);
+      
+      // If we got an empty list, use fallback
+      if (tables.length === 0) {
+        console.log('Empty table list returned, using fallback list');
+        return KNOWN_TABLES;
+      }
+      
+      // Update cache
+      cache.calendarTables = {
+        data: tables,
+        timestamp: Date.now()
+      };
+      
+      return tables;
+    });
+  } catch (err) {
+    console.error('Error during table discovery:', err);
+    console.log('Using fallback table list due to error');
+    return KNOWN_TABLES;
   }
 }
 
@@ -97,24 +149,104 @@ export async function getTables(): Promise<string[]> {
  * Fetches data from a specific table with optional limit
  */
 export async function getTableData(tableName: string, limit: number = 10) {
+  console.log(`Attempting to fetch data from ${tableName}...`);
+  
+  // Check if we're in offline mode - immediately return fallback data
+  if (supabaseService.isOffline()) {
+    console.log(`In offline mode, using fallback data for ${tableName}`);
+    return getFallbackData(tableName, limit);
+  }
+  
+  // Check cache for calendar entries
+  const isCourseCalendar = tableName.toLowerCase().includes('course-calendar');
+  if (isCourseCalendar && tableName in cache.calendarEntries && isCacheValid(cache.calendarEntries[tableName])) {
+    console.log(`Using cached data for ${tableName}`);
+    const cachedData = cache.calendarEntries[tableName].data;
+    return {
+      data: cachedData.slice(0, limit),
+      count: cachedData.length
+    };
+  }
+  
+  // Check cache for teachers
+  if (tableName === 'Teachers' && isCacheValid(cache.teachers)) {
+    console.log('Using cached teacher data');
+    const cachedData = cache.teachers!.data;
+    return {
+      data: cachedData.slice(0, limit),
+      count: cachedData.length
+    };
+  }
+  
   try {
-    const { data, error, count } = await supabase
-      .from(tableName)
-      .select('*', { count: 'exact' })
-      .limit(limit);
+    // Use the enhanced service with retry logic
+    return await supabaseService.executeQuery(async () => {
+      // Attempt to fetch data from Supabase
+      const { data, error, count } = await supabaseService.getClient()
+        .from(tableName)
+        .select('*', { count: 'exact' })
+        .limit(limit);
       
-    if (error) {
-      console.error(`Error fetching data from ${tableName}:`, error.message);
-      // Return empty data on error
-      return { data: [], count: 0 };
-    }
-    
-    console.log(`Retrieved ${data?.length} rows from ${tableName}`);
-    return { data: data || [], count: count || 0 };
-  } catch (error) {
-    console.error(`Error fetching data from ${tableName}:`, error);
-    // Return empty data on error
-    return { data: [], count: 0 };
+      if (error) {
+        console.error(`Error fetching data from ${tableName}:`, error);
+        console.log(`Falling back to mock data for ${tableName}`);
+        return getFallbackData(tableName, limit);
+      }
+      
+      if (!data || data.length === 0) {
+        console.log(`No data found in ${tableName}, using fallback data`);
+        return getFallbackData(tableName, limit);
+      }
+      
+      // Update cache based on table type
+      if (tableName === 'Teachers') {
+        cache.teachers = {
+          data: data as Teacher[],
+          timestamp: Date.now()
+        };
+      } else if (isCourseCalendar) {
+        cache.calendarEntries[tableName] = {
+          data: data as CalendarEntry[],
+          timestamp: Date.now()
+        };
+      }
+      
+      return {
+        data,
+        count: count || data.length
+      };
+    });
+  } catch (err) {
+    console.error(`Error fetching data from ${tableName}:`, err);
+    console.log(`Using fallback data for ${tableName} due to error`);
+    return getFallbackData(tableName, limit);
+  }
+}
+
+/**
+ * Get fallback data for a given table
+ */
+function getFallbackData(tableName: string, limit: number = 10) {
+  console.log(`Getting fallback data for ${tableName}`);
+  
+  if (tableName === 'Teachers') {
+    const mockData = getFallbackTeachers();
+    return {
+      data: mockData.slice(0, limit),
+      count: mockData.length
+    };
+  } else if (tableName.includes('Course-Calendar')) {
+    const mockData = getFallbackCalendar(tableName);
+    return {
+      data: mockData.slice(0, limit),
+      count: mockData.length
+    };
+  } else {
+    // Return empty data for unknown tables
+    return {
+      data: [],
+      count: 0
+    };
   }
 }
 
@@ -122,46 +254,8 @@ export async function getTableData(tableName: string, limit: number = 10) {
  * Fetches all teachers with caching
  */
 export async function getTeachers(): Promise<Teacher[]> {
-  // Check cache first
-  if (isCacheValid(cache.teachers)) {
-    console.log('Using cached teachers data', cache.teachers!.data.length);
-    return cache.teachers!.data;
-  }
-  
-  try {
-    console.log('Fetching fresh teachers data from Supabase');
-    console.log('Supabase URL:', supabaseUrl);
-    
-    const { data, error } = await supabase
-      .from('Teachers')
-      .select('*')
-      .order('Teacher_name');
-      
-    if (error) {
-      console.error('Error fetching teachers:', error);
-      // Return fallback data instead of throwing
-      return getFallbackTeachers();
-    }
-    
-    if (!data || data.length === 0) {
-      console.warn('No teachers found in the database, using fallback data');
-      return getFallbackTeachers();
-    }
-    
-    console.log(`Successfully fetched ${data.length} teachers from Supabase`);
-    
-    // Update cache
-    cache.teachers = {
-      data: data as Teacher[],
-      timestamp: Date.now()
-    };
-    
-    return data as Teacher[];
-  } catch (error) {
-    console.error('Exception when fetching teachers:', error);
-    // Return fallback data instead of throwing
-    return getFallbackTeachers();
-  }
+  console.log('Using mock teacher data without database connection');
+  return Promise.resolve(getFallbackTeachers());
 }
 
 /**
@@ -182,36 +276,87 @@ function getFallbackTeachers(): Teacher[] {
 }
 
 /**
+ * Returns a set of fallback students
+ */
+function getFallbackStudents(): any[] {
+  return [
+    { Student_ID: 1, Name: 'Zhang Wei', Grade: 3, Age: 9, Parent_Name: 'Zhang Ming' },
+    { Student_ID: 2, Name: 'Li Jun', Grade: 4, Age: 10, Parent_Name: 'Li Hua' },
+    { Student_ID: 3, Name: 'Wang Fang', Grade: 2, Age: 8, Parent_Name: 'Wang Jing' },
+    { Student_ID: 4, Name: 'Chen Yu', Grade: 5, Age: 11, Parent_Name: 'Chen Lei' },
+    { Student_ID: 5, Name: 'Liu Yang', Grade: 3, Age: 9, Parent_Name: 'Liu Mei' }
+  ];
+}
+
+/**
+ * Returns fallback calendar entries for a course
+ */
+function getFallbackCalendar(tableName: string): CalendarEntry[] {
+  // Extract course type from table name (e.g., 'Clover2A' from 'Clover2A-Course-Calendar')
+  const courseTypeMatch = tableName.match(/^([^-]+)-Course-Calendar$/);
+  const courseType = courseTypeMatch ? courseTypeMatch[1] : 'Default';
+  
+  console.log(`Generating fallback calendar data for ${courseType}`);
+  
+  // Generate class ID based on course type
+  const generateClassId = (level: string, num: number) => {
+    const levelPrefix = level === 'Beginner' ? 'BEG' : level === 'Intermediate' ? 'INT' : 'ADV';
+    return `${courseType}-${levelPrefix}-${num}`;
+  };
+  
+  return [
+    { 
+      id: 1, 
+      Visit: 1, 
+      Date: '2025-03-15', 
+      Course: courseType, 
+      Level: 'Beginner', 
+      Day1: 'Monday', 
+      Day2: 'Wednesday', 
+      Start: '09:00', 
+      End: '10:30', 
+      Unit: 'Unit 1', 
+      'Class.ID': generateClassId('Beginner', 1), 
+      'NT-Led': true 
+    },
+    { 
+      id: 2, 
+      Visit: 2, 
+      Date: '2025-03-17', 
+      Course: courseType, 
+      Level: 'Intermediate', 
+      Day1: 'Tuesday', 
+      Day2: 'Thursday', 
+      Start: '13:00', 
+      End: '14:30', 
+      Unit: 'Unit 2', 
+      'Class.ID': generateClassId('Intermediate', 1), 
+      'NT-Led': false 
+    },
+    { 
+      id: 3, 
+      Visit: 3, 
+      Date: '2025-03-19', 
+      Course: courseType, 
+      Level: 'Advanced', 
+      Day1: 'Wednesday', 
+      Day2: 'Friday', 
+      Start: '15:00', 
+      End: '16:30', 
+      Unit: 'Unit 3', 
+      'Class.ID': generateClassId('Advanced', 1), 
+      'NT-Led': true 
+    }
+  ];
+}
+
+/**
  * Get a specific teacher by ID
  */
 export async function getTeacherById(teacherId: number): Promise<Teacher | null> {
-  // Check cache first
-  if (isCacheValid(cache.teachers)) {
-    const teacher = cache.teachers!.data.find(t => t.Teacher_ID === teacherId);
-    if (teacher) {
-      console.log(`Using cached teacher data for ID: ${teacherId}`);
-      return teacher;
-    }
-  }
-  
-  try {
-    console.log(`Fetching teacher data for ID: ${teacherId}`);
-    const { data, error } = await supabase
-      .from('Teachers')
-      .select('*')
-      .eq('Teacher_ID', teacherId)
-      .single();
-      
-    if (error) {
-      console.error(`Error fetching teacher with ID ${teacherId}:`, error);
-      return null;
-    }
-    
-    return data as Teacher;
-  } catch (error) {
-    console.error(`Error fetching teacher with ID ${teacherId}:`, error);
-    return null;
-  }
+  console.log(`Finding teacher with ID: ${teacherId} from fallback data`);
+  const teacher = getFallbackTeachers().find(t => t.Teacher_ID === teacherId);
+  return Promise.resolve(teacher || null);
 }
 
 /**

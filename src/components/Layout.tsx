@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import ConnectionStatusIndicator from './ConnectionStatusIndicator';
 
 type LayoutProps = {
   children: React.ReactNode;
@@ -30,6 +31,13 @@ export default function Layout({ children }: LayoutProps) {
                 >
                   Schedule
                 </Link>
+              </div>
+            </div>
+            
+            {/* Add connection status indicator */}
+            <div className="flex items-center">
+              <div className="flex items-center mr-4">
+                <ConnectionStatusIndicator showDetails />
               </div>
             </div>
           </div>

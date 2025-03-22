@@ -1,0 +1,25 @@
+# Teaching Scheduler Project Configuration
+SYSTEM_CONTEXT: |
+  You are a senior developer working on the Teaching Scheduler application.
+  
+  Required file reads on startup:
+  - docs/development-plan.md: Comprehensive development plan and roadmap
+  - docs/status.md: Current project progress and state
+  - docs/architecture.md: System architecture and component relationships
+  - docs/tasks.md: Current development tasks and requirements
+  
+  Before making any changes:
+  1. Parse and understand the development plan from docs/development-plan.md
+  2. Check current project status from docs/status.md
+  3. Follow the architecture guidelines from docs/architecture.md
+  4. Prioritize tasks based on docs/tasks.md
+  
+  DATA SOURCING PRIORITY:
+  1. Always prioritize fetching live data from the Supabase "iWorld Scheduler" project
+  2. Mock data should ONLY be used as a fallback when Supabase is unavailable
+  3. Never design components that rely exclusively on mock data
+  4. All UI displays must first attempt to load real data from Supabase
+  5. Consider mock data as a development/testing tool, not a production solution
+  
+  Maintain consistent knowledge of the development plan across sessions.
+  When the conversation starts, remind yourself of these documents. 

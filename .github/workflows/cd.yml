@@ -1,0 +1,350 @@
+name: Teaching Scheduler CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment: staging
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=short
+            
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          
+      - name: Set up MCP CLI
+        run: |
+          npm install -g @anthropic-ai/mcp-server
+          echo "MCP CLI installed successfully"
+          
+      - name: Deploy using MCP Docker Server
+        run: |
+          # Store previous version for potential rollback
+          echo "PREVIOUS_VERSION=${{ secrets.CURRENT_STAGING_VERSION }}" >> $GITHUB_ENV
+          # Set current version for future rollbacks
+          echo "CURRENT_VERSION=${{ steps.meta.outputs.tags }}" >> $GITHUB_ENV
+          
+          # Connect to MCP Docker Server and deploy
+          npx @anthropic-ai/mcp-server-cli docker deploy \
+            --server ${{ secrets.STAGING_MCP_SERVER_URL }} \
+            --image ${{ steps.meta.outputs.tags }} \
+            --env SUPABASE_URL=${{ secrets.SUPABASE_URL }} \
+            --env SUPABASE_KEY=${{ secrets.SUPABASE_KEY }} \
+            --env TAG=${{ steps.meta.outputs.version }} \
+            --port 3000:3000 \
+            --name teaching-scheduler
+      
+      - name: Verify deployment with MCP
+        id: verify
+        run: |
+          echo "Waiting for deployment to be ready..."
+          sleep 10
+          
+          # Set variable to track verification status
+          DEPLOYMENT_VERIFIED=false
+          
+          # Check health endpoint via MCP server
+          for i in {1..12}; do
+            HEALTH_STATUS=$(npx @anthropic-ai/mcp-server-cli request \
+              --server ${{ secrets.STAGING_MCP_SERVER_URL }} \
+              --url "http://localhost:3000/api/health" \
+              --method GET)
+            
+            if echo "$HEALTH_STATUS" | grep -q "\"status\":\"ok\""; then
+              echo "Deployment verified on attempt $i!"
+              DEPLOYMENT_VERIFIED=true
+              break
+            fi
+            
+            echo "Attempt $i: Service not ready yet, waiting..."
+            sleep 5
+          done
+          
+          # Set output variable for next steps
+          echo "verified=$DEPLOYMENT_VERIFIED" >> $GITHUB_OUTPUT
+          
+          # Exit based on verification status
+          if [ "$DEPLOYMENT_VERIFIED" = "false" ]; then
+            echo "Deployment verification failed after 12 attempts"
+            exit 1
+          fi
+            
+      - name: Rollback on failure
+        if: failure() && steps.verify.outcome == 'failure' && env.PREVIOUS_VERSION != ''
+        run: |
+          echo "Deployment failed, rolling back to previous version: ${{ env.PREVIOUS_VERSION }}"
+          
+          # Rollback using MCP Docker Server
+          npx @anthropic-ai/mcp-server-cli docker deploy \
+            --server ${{ secrets.STAGING_MCP_SERVER_URL }} \
+            --image ${{ env.PREVIOUS_VERSION }} \
+            --env SUPABASE_URL=${{ secrets.SUPABASE_URL }} \
+            --env SUPABASE_KEY=${{ secrets.SUPABASE_KEY }} \
+            --env TAG=rollback \
+            --port 3000:3000 \
+            --name teaching-scheduler
+            
+          echo "Rollback complete, previous version restored"
+            
+      - name: Update current version in secrets
+        if: success()
+        uses: gliech/create-github-secret-action@v1
+        with:
+          name: CURRENT_STAGING_VERSION
+          value: ${{ steps.meta.outputs.tags }}
+          pa_token: ${{ secrets.GH_PA_TOKEN }}
+            
+      - name: Notify deployment success
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: deployments
+          SLACK_COLOR: good
+          SLACK_TITLE: Staging Deployment Successful
+          SLACK_MESSAGE: 'Teaching Scheduler has been successfully deployed to staging!'
+          
+      - name: Notify deployment failure
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: deployments
+          SLACK_COLOR: danger
+          SLACK_TITLE: Staging Deployment Failed
+          SLACK_MESSAGE: 'Teaching Scheduler deployment to staging failed! Automatic rollback attempted.'
+          
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
+    environment: production
+    needs: deploy-staging
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=short
+            latest
+            
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          
+      - name: Set up MCP CLI
+        run: |
+          npm install -g @anthropic-ai/mcp-server
+          echo "MCP CLI installed successfully"
+          
+      - name: Deploy using MCP Kubernetes Server
+        run: |
+          # Store previous version for potential rollback
+          echo "PREVIOUS_VERSION=${{ secrets.CURRENT_PRODUCTION_VERSION }}" >> $GITHUB_ENV
+          # Set current version for future rollbacks
+          echo "CURRENT_VERSION=${{ steps.meta.outputs.tags }}" >> $GITHUB_ENV
+          
+          # Create Kubernetes deployment configuration
+          cat > k8s-deployment.yaml << EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: teaching-scheduler
+            namespace: teaching-scheduler
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: teaching-scheduler
+            template:
+              metadata:
+                labels:
+                  app: teaching-scheduler
+              spec:
+                containers:
+                - name: app
+                  image: ${{ steps.meta.outputs.tags }}
+                  ports:
+                  - containerPort: 3000
+                  env:
+                  - name: NODE_ENV
+                    value: production
+                  - name: SUPABASE_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: teaching-scheduler-secrets
+                        key: supabase-url
+                  - name: SUPABASE_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: teaching-scheduler-secrets
+                        key: supabase-key
+                  livenessProbe:
+                    httpGet:
+                      path: /api/health
+                      port: 3000
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+          EOF
+          
+          # Deploy using MCP Kubernetes Server
+          npx @anthropic-ai/mcp-server-cli k8s apply \
+            --server ${{ secrets.PRODUCTION_MCP_SERVER_URL }} \
+            --file k8s-deployment.yaml
+      
+      - name: Verify deployment with MCP
+        id: verify_prod
+        run: |
+          echo "Waiting for deployment to be ready..."
+          sleep 30
+          
+          # Set variable to track verification status
+          DEPLOYMENT_VERIFIED=false
+          
+          # Check deployment status via MCP server
+          for i in {1..24}; do
+            DEPLOYMENT_STATUS=$(npx @anthropic-ai/mcp-server-cli k8s get-deployment \
+              --server ${{ secrets.PRODUCTION_MCP_SERVER_URL }} \
+              --name teaching-scheduler \
+              --namespace teaching-scheduler)
+            
+            AVAILABLE_REPLICAS=$(echo "$DEPLOYMENT_STATUS" | grep -o '"availableReplicas":[0-9]*' | cut -d':' -f2)
+            
+            if [ "$AVAILABLE_REPLICAS" = "2" ]; then
+              echo "Deployment verified on attempt $i!"
+              DEPLOYMENT_VERIFIED=true
+              break
+            fi
+            
+            echo "Attempt $i: Available replicas: $AVAILABLE_REPLICAS, waiting..."
+            sleep 10
+          done
+          
+          # Set output variable for next steps
+          echo "verified=$DEPLOYMENT_VERIFIED" >> $GITHUB_OUTPUT
+          
+          # Exit based on verification status
+          if [ "$DEPLOYMENT_VERIFIED" = "false" ]; then
+            echo "Deployment verification failed after 24 attempts"
+            exit 1
+          fi
+            
+      - name: Rollback on failure
+        if: failure() && steps.verify_prod.outcome == 'failure' && env.PREVIOUS_VERSION != ''
+        run: |
+          echo "Deployment failed, rolling back to previous version: ${{ env.PREVIOUS_VERSION }}"
+          
+          # Modify deployment to use previous version
+          cat > k8s-rollback.yaml << EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: teaching-scheduler
+            namespace: teaching-scheduler
+          spec:
+            template:
+              spec:
+                containers:
+                - name: app
+                  image: ${{ env.PREVIOUS_VERSION }}
+          EOF
+          
+          # Rollback using MCP Kubernetes Server
+          npx @anthropic-ai/mcp-server-cli k8s apply \
+            --server ${{ secrets.PRODUCTION_MCP_SERVER_URL }} \
+            --file k8s-rollback.yaml
+            
+          echo "Rollback complete, previous version restored"
+            
+      - name: Update current version in secrets
+        if: success()
+        uses: gliech/create-github-secret-action@v1
+        with:
+          name: CURRENT_PRODUCTION_VERSION
+          value: ${{ steps.meta.outputs.tags }}
+          pa_token: ${{ secrets.GH_PA_TOKEN }}
+            
+      - name: Notify deployment success
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: deployments
+          SLACK_COLOR: good
+          SLACK_TITLE: Production Deployment Successful
+          SLACK_MESSAGE: 'Teaching Scheduler has been successfully deployed to production!'
+          
+      - name: Notify deployment failure
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: deployments
+          SLACK_COLOR: danger
+          SLACK_TITLE: Production Deployment Failed
+          SLACK_MESSAGE: 'Teaching Scheduler deployment to production failed! Automatic rollback attempted.' 

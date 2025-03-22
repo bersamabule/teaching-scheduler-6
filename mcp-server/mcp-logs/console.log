@@ -1,0 +1,52 @@
+# MCP Console Logs
+
+[7:36:32 a.m.] LOG   | [MCP] Console monitoring active
+[7:36:32 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:32 a.m.] LOG   | [Fast Refresh] done in 90ms
+[7:36:33 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:33 a.m.] LOG   | [Fast Refresh] done in 168ms
+[7:36:33 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:34 a.m.] LOG   | [Fast Refresh] done in 564ms
+[7:36:34 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:34 a.m.] LOG   | [Fast Refresh] done in 24ms
+[7:36:34 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:34 a.m.] LOG   | [DB] Using MOCK database client - no real connection will be made
+[7:36:34 a.m.] LOG   | [DB] All data is generated locally as fallback data
+[7:36:34 a.m.] LOG   | [Fast Refresh] done in 63ms
+[7:36:34 a.m.] LOG   | Starting database analysis...
+[7:36:34 a.m.] LOG   | Starting database discovery...
+[7:36:34 a.m.] LOG   | Using mock tables without database connection
+[7:36:34 a.m.] LOG   | Starting database analysis...
+[7:36:34 a.m.] LOG   | Starting database discovery...
+[7:36:34 a.m.] LOG   | Using mock tables without database connection
+[7:36:34 a.m.] LOG   | Found 5 tables
+[7:36:34 a.m.] LOG   | Found 5 tables
+[7:36:35 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:35 a.m.] LOG   | [Fast Refresh] done in 167ms
+[7:36:36 a.m.] LOG   | Loading data from table: Students-English
+[7:36:36 a.m.] LOG   | Attempting to fetch data from Students-English...
+[7:36:36 a.m.] LOG   | Returning mock data for Students-English: 5 rows
+[7:36:36 a.m.] LOG   | Loaded 5 rows from Students-English (total: 5)
+[7:36:37 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:37 a.m.] LOG   | [Fast Refresh] done in 168ms
+[7:36:38 a.m.] LOG   | Loading data from table: Sprouts2-Course-Calendar
+[7:36:38 a.m.] LOG   | Attempting to fetch data from Sprouts2-Course-Calendar...
+[7:36:38 a.m.] LOG   | Returning mock data for Sprouts2-Course-Calendar: 3 rows
+[7:36:38 a.m.] LOG   | Loaded 3 rows from Sprouts2-Course-Calendar (total: 3)
+[7:36:39 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:39 a.m.] LOG   | [Fast Refresh] done in 214ms
+[7:36:40 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:40 a.m.] LOG   | [Fast Refresh] done in 183ms
+[7:36:41 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:42 a.m.] LOG   | [Fast Refresh] done in 183ms
+[7:36:43 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:43 a.m.] LOG   | [Fast Refresh] done in 184ms
+[7:36:44 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:44 a.m.] LOG   | [Fast Refresh] done in 184ms
+[7:36:45 a.m.] LOG   | [Fast Refresh] rebuilding
+[7:36:45 a.m.] LOG   | [Fast Refresh] done in 168ms
+[7:36:45 a.m.] LOG   | Loading data from table: Teachers
+[7:36:45 a.m.] LOG   | Attempting to fetch data from Teachers...
+[7:36:45 a.m.] LOG   | Using fallback teacher data
+[7:36:45 a.m.] LOG   | Returning mock data for Teachers: 8 rows
+[7:36:45 a.m.] LOG   | Loaded 8 rows from Teachers (total: 8)

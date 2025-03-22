@@ -24,31 +24,44 @@ export default function TeacherSelect({ selectedTeacherId, onTeacherSelect }: Te
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isOpen, setIsOpen] = useState<boolean>(false);
+  const [debugInfo, setDebugInfo] = useState<string[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Debug log helper
+  const addDebugLog = (message: string) => {
+    console.log(`[TeacherSelect] ${message}`);
+    setDebugInfo(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
+  };
   
   // Load teachers from Supabase
   useEffect(() => {
     async function loadTeachers() {
       setIsLoading(true);
       try {
-        console.log('Attempting to load teachers from database...');
+        addDebugLog('Attempting to load teachers from database...');
         const teachersData = await getTeachers();
         
         if (!teachersData || teachersData.length === 0) {
-          console.log('No teachers found in database, using fallback data');
+          addDebugLog('No teachers found in database, using fallback data');
           setTeachers(FALLBACK_TEACHERS);
         } else {
-          console.log(`Loaded ${teachersData.length} teachers from database`);
+          addDebugLog(`Loaded ${teachersData.length} teachers from database`);
           const formattedTeachers = teachersData.map(teacher => ({
             id: teacher.Teacher_ID,
             name: teacher.Teacher_name,
             type: teacher.Teacher_Type || 'Unknown'
           }));
+          
+          // Log the first few teachers for debugging
+          formattedTeachers.slice(0, 3).forEach(t => {
+            addDebugLog(`Teacher: ${t.id} - ${t.name} (${t.type})`);
+          });
+          
           setTeachers(formattedTeachers);
         }
       } catch (error) {
-        console.error('Error loading teachers:', error);
-        console.log('Using fallback teacher data');
+        addDebugLog(`Error loading teachers: ${error instanceof Error ? error.message : String(error)}`);
+        addDebugLog('Using fallback teacher data');
         setTeachers(FALLBACK_TEACHERS);
       } finally {
         setIsLoading(false);
@@ -141,6 +154,97 @@ export default function TeacherSelect({ selectedTeacherId, onTeacherSelect }: Te
           ) : filteredTeachers.length === 0 ? (
             <div className="p-2 text-center text-gray-500 text-xs">
               No teachers found
+            </div>
+          ) : debugInfo.length > 0 && isOpen ? (
+            <div className="max-h-48 overflow-y-auto p-1">
+              {/* Debug information */}
+              <div className="px-2 py-1 text-[10px] bg-gray-700 text-white rounded mb-2">
+                Debug Info ({debugInfo.length} messages)
+                {debugInfo.slice(-3).map((msg, idx) => (
+                  <div key={idx} className="text-gray-300 mt-1">{msg}</div>
+                ))}
+              </div>
+              
+              {/* Native Teachers */}
+              {filteredTeachers.some(t => t.type.toLowerCase() === 'native') && (
+                <div>
+                  <div className="px-2 py-1 text-[10px] font-semibold bg-gray-100 text-gray-700 rounded-t">
+                    Native Teachers
+                  </div>
+                  {filteredTeachers
+                    .filter(t => t.type.toLowerCase() === 'native')
+                    .map(teacher => (
+                      <div
+                        key={teacher.id}
+                        className={`
+                          px-2 py-1 text-xs cursor-pointer truncate
+                          ${teacher.id === selectedTeacherId ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50'}
+                        `}
+                        onClick={() => {
+                          onTeacherSelect(teacher.id);
+                          setIsOpen(false);
+                          setSearchQuery('');
+                        }}
+                      >
+                        {teacher.name}
+                      </div>
+                    ))}
+                </div>
+              )}
+              
+              {/* Local Teachers */}
+              {filteredTeachers.some(t => t.type.toLowerCase() === 'local') && (
+                <div className="mt-2">
+                  <div className="px-2 py-1 text-[10px] font-semibold bg-gray-100 text-gray-700 rounded-t">
+                    Local Teachers
+                  </div>
+                  {filteredTeachers
+                    .filter(t => t.type.toLowerCase() === 'local')
+                    .map(teacher => (
+                      <div
+                        key={teacher.id}
+                        className={`
+                          px-2 py-1 text-xs cursor-pointer truncate
+                          ${teacher.id === selectedTeacherId ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50'}
+                        `}
+                        onClick={() => {
+                          onTeacherSelect(teacher.id);
+                          setIsOpen(false);
+                          setSearchQuery('');
+                        }}
+                      >
+                        {teacher.name}
+                      </div>
+                    ))}
+                </div>
+              )}
+              
+              {/* Other Teachers */}
+              {filteredTeachers.some(t => !['native', 'local'].includes(t.type.toLowerCase())) && (
+                <div className="mt-2">
+                  <div className="px-2 py-1 text-[10px] font-semibold bg-gray-100 text-gray-700 rounded-t">
+                    Other Teachers
+                  </div>
+                  {filteredTeachers
+                    .filter(t => !['native', 'local'].includes(t.type.toLowerCase()))
+                    .map(teacher => (
+                      <div
+                        key={teacher.id}
+                        className={`
+                          px-2 py-1 text-xs cursor-pointer truncate
+                          ${teacher.id === selectedTeacherId ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50'}
+                        `}
+                        onClick={() => {
+                          onTeacherSelect(teacher.id);
+                          setIsOpen(false);
+                          setSearchQuery('');
+                        }}
+                      >
+                        {teacher.name}
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
           ) : (
             <div className="max-h-48 overflow-y-auto p-1">

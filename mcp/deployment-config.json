@@ -1,0 +1,70 @@
+{
+  "environments": {
+    "staging": {
+      "type": "docker",
+      "healthCheckUrl": "http://localhost:3000/api/health",
+      "healthCheckTimeout": 60,
+      "rollbackEnabled": true,
+      "deploymentServer": {
+        "type": "docker-mcp",
+        "url": "http://localhost:3002",
+        "containerName": "teaching-scheduler-staging",
+        "ports": {
+          "3000": "3000"
+        }
+      },
+      "notifications": {
+        "slack": {
+          "enabled": true,
+          "channel": "deployments"
+        },
+        "email": {
+          "enabled": false,
+          "recipients": []
+        }
+      }
+    },
+    "production": {
+      "type": "kubernetes",
+      "healthCheckUrl": "http://localhost:3000/api/health",
+      "healthCheckTimeout": 120,
+      "rollbackEnabled": true,
+      "deploymentServer": {
+        "type": "kubernetes-mcp",
+        "url": "http://localhost:3003",
+        "namespace": "teaching-scheduler",
+        "deployment": "teaching-scheduler",
+        "replicas": 2
+      },
+      "notifications": {
+        "slack": {
+          "enabled": true,
+          "channel": "deployments"
+        },
+        "email": {
+          "enabled": true,
+          "recipients": ["admin@example.com"]
+        }
+      }
+    }
+  },
+  "general": {
+    "historySize": 10,
+    "logLevel": "info",
+    "deploymentTimeout": 300,
+    "healthCheckInterval": 5
+  },
+  "docker": {
+    "registry": "ghcr.io",
+    "repository": "teaching-scheduler",
+    "credentialsSecret": "DOCKER_CREDENTIALS"
+  },
+  "kubernetes": {
+    "configPath": "../k8s",
+    "templates": {
+      "deployment": "deployment.yaml",
+      "service": "service.yaml",
+      "ingress": "ingress.yaml"
+    }
+  }
+} 

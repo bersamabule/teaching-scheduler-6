@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: teaching-scheduler
+  labels:
+    app: teaching-scheduler
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: teaching-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: teaching-scheduler
+    spec:
+      containers:
+      - name: teaching-scheduler
+        image: ghcr.io/your-org/teaching-scheduler:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: NEXT_TELEMETRY_DISABLED
+          value: "1"
+        - name: SUPABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: teaching-scheduler-secrets
+              key: supabase-url
+        - name: SUPABASE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: teaching-scheduler-secrets
+              key: supabase-key
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+      imagePullSecrets:
+      - name: github-registry
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: teaching-scheduler
+  labels:
+    app: teaching-scheduler
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 3000
+    protocol: TCP
+    name: http
+  selector:
+    app: teaching-scheduler
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: teaching-scheduler
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  tls:
+  - hosts:
+    - scheduler.example.com
+    secretName: scheduler-tls
+  rules:
+  - host: scheduler.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: teaching-scheduler
+            port:
+              number: 80 

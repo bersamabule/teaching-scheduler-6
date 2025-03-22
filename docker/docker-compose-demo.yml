@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # Teaching Scheduler Next.js application - Demo
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: builder # Use the builder stage for development
+    command: npm run dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ..:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+    restart: unless-stopped
+
+networks:
+  default:
+    driver: bridge 

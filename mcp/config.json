@@ -1,0 +1,62 @@
+{
+  "mcpServers": {
+    "docker-mcp": {
+      "command": "uvx",
+      "args": ["docker-mcp"],
+      "env": {
+        "DOCKER_HOST": "unix:///var/run/docker.sock",
+        "MCP_PORT": "3002"
+      }
+    },
+    "console-monitor": {
+      "command": "npx",
+      "args": ["@anthropic-ai/mcp-server", "console"],
+      "env": {
+        "MCP_PORT": "3001"
+      }
+    },
+    "cli-tools": {
+      "command": "uvx",
+      "args": ["cli-mcp-server"],
+      "env": {
+        "ALLOWED_DIR": "${project_root}/scripts",
+        "ALLOWED_COMMANDS": "npm,node,bash,echo,curl,docker,docker-compose",
+        "MAX_COMMAND_LENGTH": "2048",
+        "COMMAND_TIMEOUT": "300"
+      }
+    }
+  },
+  "dockerMcp": {
+    "containers": {
+      "teaching-scheduler": {
+        "image": "teaching-scheduler:latest",
+        "build": {
+          "context": "${project_root}",
+          "dockerfile": "docker/Dockerfile"
+        },
+        "ports": {
+          "3000": "3000"
+        },
+        "environment": {
+          "NODE_ENV": "production",
+          "SUPABASE_URL": "${env:SUPABASE_URL}",
+          "SUPABASE_KEY": "${env:SUPABASE_KEY}"
+        }
+      },
+      "mcp-console": {
+        "image": "node:18-alpine",
+        "command": "npx @anthropic-ai/mcp-server console",
+        "ports": {
+          "3001": "3001"
+        },
+        "environment": {
+          "MCP_PORT": "3001"
+        }
+      }
+    },
+    "composeFiles": {
+      "development": "${project_root}/docker/docker-compose.yml",
+      "production": "${project_root}/docker/docker-compose.prod.yml"
+    }
+  }
+} 

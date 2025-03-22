@@ -1,0 +1,22 @@
+{
+  "name": "teaching-scheduler-mcp",
+  "version": "1.0.0",
+  "description": "MCP Servers for Teaching Scheduler deployments",
+  "main": "cli-mcp-server.js",
+  "scripts": {
+    "start:cli": "node cli-mcp-server.js",
+    "start:docker": "node docker-mcp-server.js",
+    "start:k8s": "node k8s-mcp-server.js",
+    "start:deployment": "node deployment-manager.js",
+    "start:all": "concurrently \"npm run start:cli\" \"npm run start:docker\" \"npm run start:k8s\" \"npm run start:deployment\""
+  },
+  "dependencies": {
+    "@anthropic-ai/mcp-server": "^1.0.0",
+    "js-yaml": "^4.1.0",
+    "concurrently": "^8.2.0",
+    "axios": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

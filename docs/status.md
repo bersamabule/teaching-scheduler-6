@@ -92,7 +92,28 @@ The Teaching Scheduler 6 application is currently in active development, with si
 | CLI MCP | ✅ Operational | 3001 | Secure command execution |
 | Docker MCP | ✅ Operational | 3002 | Container management |
 | Kubernetes MCP | ✅ Operational | 3003 | Kubernetes orchestration |
+| Console Monitor MCP | ✅ Operational | 3004 | Console logging and analysis |
 | Deployment Manager | ✅ Operational | 3005 | Deployment lifecycle management |
+
+## Recent Improvements
+
+### Console Monitoring System
+The application now includes a sophisticated console monitoring system:
+
+- ✅ Integration with MCP server for capturing and analyzing browser console logs
+- ✅ In-app console viewer with filtering and search capabilities
+- ✅ Automatic capture of unhandled errors and promise rejections
+- ✅ Contextual information about log origins
+- ✅ Debug panel in non-production environments
+
+### Supabase Connectivity
+Several improvements have been made to enhance Supabase connectivity:
+
+- ✅ Fixed environment variable consistency (NEXT_PUBLIC_SUPABASE_ANON_KEY)
+- ✅ Replaced non-existent RPC function call with direct table query
+- ✅ Enhanced error logging and debugging information
+- ✅ Improved connection status reporting
+- ✅ More robust fallback mechanisms
 
 ## Rollback Capability
 

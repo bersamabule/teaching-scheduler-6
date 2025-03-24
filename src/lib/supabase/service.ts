@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { supabaseUrl, supabaseKey, supabase as supabaseClient } from './client';
+import { supabaseUrl, supabaseKey, supabase } from './client';
 
 /**
  * Status of the Supabase connection
@@ -11,6 +11,8 @@ export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting' | 'er
  */
 export interface ConnectionObserver {
   onConnectionStatusChanged: (status: ConnectionStatus, error?: Error) => void;
+  onSynchronizationStart?: () => void;
+  onSynchronizationComplete?: () => void;
 }
 
 /**
@@ -18,17 +20,20 @@ export interface ConnectionObserver {
  */
 export class SupabaseService {
   private static instance: SupabaseService;
-  private client = supabaseClient; // Use the pre-initialized client
+  private client = supabase; // Use the pre-initialized client
   
   private status: ConnectionStatus = 'disconnected';
   private lastError?: Error;
-  private maxRetries = 2; // Reduced retries to prevent excessive attempts
+  private maxRetries = 3; // Increased from 2 for better reliability
   private retryDelay = 2000; 
   private observers: ConnectionObserver[] = [];
   private pingInterval?: NodeJS.Timeout;
   private connectionAttempts = 0;
-  private maxConnectionAttempts = 3; // Reduced to prevent excessive retries
+  private maxConnectionAttempts = 3; 
   private useOfflineMode = false;
+  private retryTimeoutIds: NodeJS.Timeout[] = []; // Track timeout IDs for cleanup
+  private isSynchronizing = false;
+  private componentsUsingFallback: Set<string> = new Set();
   
   /**
    * Get the singleton instance of SupabaseService
@@ -46,6 +51,37 @@ export class SupabaseService {
   private constructor() {
     console.log(`[DB] Initializing Supabase service with client at ${supabaseUrl}`);
     this.startPingInterval();
+
+    // Attempt to detect network connectivity changes
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', this.handleNetworkChange.bind(this, true));
+      window.addEventListener('offline', this.handleNetworkChange.bind(this, false));
+      
+      // Check initial network status
+      if (navigator.onLine === false) {
+        console.log('[DB] Browser reports offline status at startup');
+        this.useOfflineMode = true;
+        this.updateStatus('disconnected');
+      }
+    }
+  }
+
+  /**
+   * Handle network connectivity changes
+   */
+  private handleNetworkChange(isOnline: boolean): void {
+    if (isOnline) {
+      console.log('[DB] Browser reports online status, attempting reconnection');
+      this.useOfflineMode = false;
+      this.connectionAttempts = 0;
+      this.ping().catch(error => {
+        console.error('[DB] Reconnection attempt failed:', this.formatError(error));
+      });
+    } else {
+      console.log('[DB] Browser reports offline status, entering offline mode');
+      this.useOfflineMode = true;
+      this.updateStatus('disconnected');
+    }
   }
   
   /**
@@ -80,7 +116,7 @@ export class SupabaseService {
    */
   private formatError(error: any): string {
     if (error instanceof Error) {
-      return `${error.name}: ${error.message}`;
+      return `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ''}`;
     } 
     if (typeof error === 'object') {
       try {
@@ -111,24 +147,52 @@ export class SupabaseService {
         setTimeout(() => reject(new Error('Connection timeout after 5000ms')), 5000);
       });
       
-      // Simple query to check connectivity - using a more reliable query
-      const queryPromise = this.client.rpc('version', {});
+      // Create an array of table queries to try in sequence
+      const tablesToTry = [
+        'Clovers1A-Course-Calendar', 
+        'Teachers', 
+        'Students-English', 
+        'Sprouts1-Course-Calendar'
+      ];
       
-      // Race the query against the timeout
-      const { data, error } = await Promise.race([
-        queryPromise,
-        timeoutPromise
-      ]) as any;
+      let connectionSuccessful = false;
       
-      if (error) {
-        throw error;
+      // Try each table until one succeeds
+      for (const table of tablesToTry) {
+        if (connectionSuccessful) break;
+        
+        console.log(`[DB] Testing connection with ${table} table query...`);
+        
+        try {
+          // Race the query against the timeout
+          const queryPromise = this.client
+            .from(table)
+            .select('count', { count: 'exact', head: true })
+            .limit(1);
+            
+          const result = await Promise.race([queryPromise, timeoutPromise]) as any;
+          
+          // If no error, connection is successful
+          if (!result.error) {
+            connectionSuccessful = true;
+            console.log(`[DB] Connection successful using ${table} table`);
+            break;
+          }
+        } catch (error) {
+          console.log(`[DB] Connection failed using ${table} table, trying next option...`);
+          // Continue to the next table
+        }
       }
       
-      // Reset connection attempts on success
-      this.connectionAttempts = 0;
-      this.useOfflineMode = false;
-      this.updateStatus('connected');
-      return true;
+      if (connectionSuccessful) {
+        // Reset connection attempts on success
+        this.connectionAttempts = 0;
+        this.useOfflineMode = false;
+        this.updateStatus('connected');
+        return true;
+      } else {
+        throw new Error('All connection attempts failed');
+      }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       this.updateStatus('error', err);
@@ -158,28 +222,47 @@ export class SupabaseService {
     console.log('[DB] Checking if Supabase is available...');
     try {
       // Try a simple fetch to see if Supabase is reachable
-      const response = await fetch(supabaseUrl, { 
-        method: 'HEAD',
-        mode: 'no-cors'
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       
-      // If we get here, we might be able to connect
-      console.log('[DB] Supabase might be reachable, attempting reconnection');
-      this.useOfflineMode = false;
-      this.connectionAttempts = 0;
-      
-      // Clear current interval and restart normal ping cycle
-      if (this.pingInterval) {
-        clearInterval(this.pingInterval);
-        this.startPingInterval();
+      try {
+        const response = await fetch(`${supabaseUrl}/rest/v1/?apikey=${supabaseKey}`, {
+          method: 'HEAD',
+          headers: {
+            'apikey': supabaseKey,
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        // Check if response is ok (2xx status)
+        if (response.ok) {
+          // If we get here, we might be able to connect
+          console.log('[DB] Supabase is reachable, attempting reconnection');
+          this.useOfflineMode = false;
+          this.connectionAttempts = 0;
+          
+          // Clear current interval and restart normal ping cycle
+          if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.startPingInterval();
+          }
+        } else {
+          console.log(`[DB] Supabase returned status ${response.status}, remaining in offline mode`);
+        }
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        throw fetchError;
       }
     } catch (e) {
-      console.log('[DB] Supabase still unreachable, remaining in offline mode');
+      console.log('[DB] Supabase still unreachable, remaining in offline mode:', 
+        e instanceof Error ? e.message : String(e));
     }
   }
   
   /**
-   * Execute a Supabase query with retry logic
+   * Execute a Supabase query with retry logic using exponential backoff
    */
   public async executeQuery<T>(
     queryFn: () => Promise<T>,
@@ -204,23 +287,41 @@ export class SupabaseService {
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       
-      // Log the error for debugging
-      console.error(`[DB] Query execution error: ${this.formatError(error)}`);
+      // Log the error
+      console.error(`[DB] Query failed (${this.maxRetries - retries + 1}/${this.maxRetries + 1}): ${this.formatError(err)}`);
       
-      // Decrement retries and try again if retries remain
-      if (retries > 0) {
-        console.log(`[DB] Query failed, retrying (${retries} attempts left)...`);
-        
-        // Wait before retrying with exponential backoff
-        const backoffTime = this.retryDelay * Math.pow(2, this.maxRetries - retries);
-        console.log(`[DB] Waiting ${backoffTime}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, backoffTime));
-        
-        return this.executeQuery(queryFn, retries - 1);
+      // If no retries left, or if it's a 404 error (which won't be fixed by retrying), throw
+      const is404 = err.message.includes('404') || err.message.includes('not found');
+      if (retries <= 0 || is404) {
+        throw err;
       }
       
-      // No retries left, throw the error
-      throw err;
+      // Calculate backoff time with jitter
+      const baseDelay = this.retryDelay;
+      const exponentialPart = Math.pow(2, this.maxRetries - retries);
+      const jitter = Math.random() * 0.3 + 0.85; // Random between 0.85 and 1.15
+      const delay = Math.min(baseDelay * exponentialPart * jitter, 30000); // Cap at 30 seconds
+      
+      console.log(`[DB] Retrying in ${Math.round(delay)}ms (${retries} retries left)`);
+      
+      // Wait and retry with exponential backoff
+      return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(async () => {
+          try {
+            // Remove the timeout ID from our tracking array
+            this.retryTimeoutIds = this.retryTimeoutIds.filter(id => id !== timeoutId);
+            
+            // Retry the query with one fewer retry remaining
+            const result = await this.executeQuery(queryFn, retries - 1);
+            resolve(result);
+          } catch (retryError) {
+            reject(retryError);
+          }
+        }, delay);
+        
+        // Track the timeout ID for cleanup
+        this.retryTimeoutIds.push(timeoutId);
+      });
     }
   }
   
@@ -249,65 +350,243 @@ export class SupabaseService {
    * Update the connection status and notify observers
    */
   private updateStatus(status: ConnectionStatus, error?: Error): void {
+    // Only update and notify if status actually changed
     const statusChanged = this.status !== status;
-    this.status = status;
-    this.lastError = error;
+    const errorChanged = 
+      (this.lastError?.message !== error?.message) || 
+      (this.lastError !== undefined && error === undefined) ||
+      (this.lastError === undefined && error !== undefined);
     
-    if (statusChanged) {
-      console.log(`[DB] Connection status changed to: ${status}${error ? ` (${this.formatError(error)})` : ''}`);
+    if (statusChanged || errorChanged) {
+      const oldStatus = this.status;
+      this.status = status;
+      this.lastError = error;
       
-      // Notify observers
+      // Notify all observers of the status change
       this.observers.forEach(observer => {
         try {
           observer.onConnectionStatusChanged(status, error);
-        } catch (err) {
-          console.error('[DB] Error in observer:', this.formatError(err));
+        } catch (obsError) {
+          console.error('[DB] Error in observer notification:', obsError);
         }
       });
+      
+      console.log(`[DB] Connection status changed: ${oldStatus} → ${status}${error ? ` (${error.message})` : ''}`);
     }
   }
   
   /**
-   * Register a connection observer
+   * Add an observer to be notified of connection status changes
    */
   public addObserver(observer: ConnectionObserver): void {
-    this.observers.push(observer);
-    
-    // Immediately notify new observer of current status
-    observer.onConnectionStatusChanged(this.status, this.lastError);
+    if (!this.observers.includes(observer)) {
+      this.observers.push(observer);
+      // Immediately notify new observer of current status
+      observer.onConnectionStatusChanged(this.status, this.lastError);
+    }
   }
   
   /**
-   * Unregister a connection observer
+   * Remove an observer from notification list
    */
   public removeObserver(observer: ConnectionObserver): void {
-    this.observers = this.observers.filter(o => o !== observer);
+    this.observers = this.observers.filter(obs => obs !== observer);
   }
   
   /**
-   * Get the Supabase client
+   * Get the Supabase client instance
    */
   public getClient() {
     return this.client;
   }
   
   /**
-   * Force a reconnection attempt
+   * Manually trigger a reconnection attempt and return the result
    */
   public async reconnect(): Promise<boolean> {
-    // Reset connection attempts counter and offline mode
-    this.connectionAttempts = 0;
-    this.useOfflineMode = false;
-    console.log('[DB] Manually attempting reconnection...');
-    return this.ping();
+    console.log('[DB] Manual reconnection triggered');
+    
+    try {
+      // Reset connection attempts counter
+      this.connectionAttempts = 0;
+      
+      // Reset offline mode to allow reconnection attempt
+      this.useOfflineMode = false;
+      
+      // Attempt to connect
+      const result = await this.ping();
+      
+      // If connection successful and there are components using fallback data, synchronize
+      if (result && this.hasFallbackComponents()) {
+        console.log(`[DB] Connection restored. ${this.getFallbackComponentCount()} components are using fallback data. Starting synchronization...`);
+        await this.synchronizeData();
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('[DB] Manual reconnection failed:', this.formatError(error));
+      return false;
+    }
   }
   
   /**
-   * Clean up resources
+   * Clean up all resources used by the service
    */
   public cleanup() {
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
+    }
+    
+    // Clear all retry timeouts
+    this.retryTimeoutIds.forEach(timeoutId => {
+      clearTimeout(timeoutId);
+    });
+    this.retryTimeoutIds = [];
+    
+    // Remove event listeners if we added them
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.handleNetworkChange.bind(this, true));
+      window.removeEventListener('offline', this.handleNetworkChange.bind(this, false));
+    }
+    
+    this.observers = [];
+    console.log('[DB] Supabase service resources cleaned up');
+  }
+  
+  /**
+   * List all available tables in the Supabase database
+   */
+  public async listTables(): Promise<string[]> {
+    if (this.useOfflineMode) {
+      return [];
+    }
+    
+    try {
+      const { data, error } = await this.client.rpc('get_tables');
+      
+      if (error) {
+        console.error('[DB] Error listing tables:', error);
+        // Try alternative approach using schema information
+        const { data: schemaData, error: schemaError } = await this.client
+          .from('information_schema.tables')
+          .select('table_name')
+          .eq('table_schema', 'public');
+          
+        if (schemaError) {
+          console.error('[DB] Error listing tables from schema:', schemaError);
+          return [];
+        }
+        
+        return (schemaData || []).map(row => row.table_name);
+      }
+      
+      return data || [];
+    } catch (error) {
+      console.error('[DB] Error listing tables:', this.formatError(error));
+      return [];
+    }
+  }
+
+  /**
+   * Register a component that is using fallback data
+   * @param componentId - A unique identifier for the component
+   */
+  public registerFallbackUsage(componentId: string): void {
+    this.componentsUsingFallback.add(componentId);
+    console.log(`[DB] Component ${componentId} registered as using fallback data`);
+  }
+
+  /**
+   * Unregister a component that was using fallback data
+   * @param componentId - A unique identifier for the component
+   */
+  public unregisterFallbackUsage(componentId: string): void {
+    this.componentsUsingFallback.delete(componentId);
+    console.log(`[DB] Component ${componentId} no longer using fallback data`);
+  }
+
+  /**
+   * Check if any components are using fallback data
+   */
+  public hasFallbackComponents(): boolean {
+    return this.componentsUsingFallback.size > 0;
+  }
+
+  /**
+   * Get the number of components using fallback data
+   */
+  public getFallbackComponentCount(): number {
+    return this.componentsUsingFallback.size;
+  }
+
+  /**
+   * Get the list of components using fallback data
+   */
+  public getFallbackComponents(): string[] {
+    return Array.from(this.componentsUsingFallback);
+  }
+
+  /**
+   * Synchronize data after a reconnection
+   * This clears cache and notifies components to reload their data
+   */
+  public async synchronizeData(): Promise<boolean> {
+    if (this.status !== 'connected') {
+      console.log('[DB] Cannot synchronize data: not connected');
+      return false;
+    }
+
+    if (this.isSynchronizing) {
+      console.log('[DB] Data synchronization already in progress');
+      return false;
+    }
+
+    try {
+      this.isSynchronizing = true;
+      console.log('[DB] Starting data synchronization');
+
+      // Notify observers that synchronization has started
+      this.observers.forEach(observer => {
+        if (observer.onSynchronizationStart) {
+          observer.onSynchronizationStart();
+        }
+      });
+
+      // Clear all cached data to force fresh data retrieval
+      await this.clearCache();
+      
+      // Wait a short period for any pending operations to complete
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      console.log('[DB] Data synchronization completed successfully');
+      
+      // Notify observers that synchronization is complete
+      this.observers.forEach(observer => {
+        if (observer.onSynchronizationComplete) {
+          observer.onSynchronizationComplete();
+        }
+      });
+      
+      return true;
+    } catch (error) {
+      console.error('[DB] Data synchronization failed:', this.formatError(error));
+      return false;
+    } finally {
+      this.isSynchronizing = false;
+    }
+  }
+
+  /**
+   * Clear all cached data
+   */
+  private async clearCache(): Promise<void> {
+    console.log('[DB] Clearing cache for data synchronization');
+    // This will be implemented externally, we're just ensuring it's accessible
+    try {
+      const { clearCache } = await import('./data');
+      clearCache();
+    } catch (error) {
+      console.error('[DB] Error clearing cache:', this.formatError(error));
     }
   }
 }

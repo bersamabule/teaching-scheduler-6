@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import Link from 'next/link';
 import ConnectionStatusIndicator from './ConnectionStatusIndicator';
@@ -31,6 +33,25 @@ export default function Layout({ children }: LayoutProps) {
                 >
                   Schedule
                 </Link>
+                {process.env.NODE_ENV !== 'production' && (
+                  <button
+                    onClick={() => {
+                      // Trigger the keyboard shortcut for ConsoleMonitor
+                      if (typeof window !== 'undefined') {
+                        const event = new KeyboardEvent('keydown', {
+                          key: 'd',
+                          ctrlKey: true,
+                          altKey: true,
+                          bubbles: true
+                        });
+                        window.dispatchEvent(event);
+                      }
+                    }}
+                    className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                  >
+                    Debug Console
+                  </button>
+                )}
               </div>
             </div>
             

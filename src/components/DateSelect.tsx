@@ -6,9 +6,11 @@ import { format, addDays, subDays, parseISO, isToday, isSameDay, startOfWeek, ad
 interface DateSelectProps {
   selectedDate: string; // Format: 'yyyy-MM-dd'
   onDateSelect: (date: string) => void;
+  onPreviousDay?: () => void; // Optional prop for previous day navigation
+  onNextDay?: () => void; // Optional prop for next day navigation
 }
 
-export default function DateSelect({ selectedDate, onDateSelect }: DateSelectProps) {
+export default function DateSelect({ selectedDate, onDateSelect, onPreviousDay, onNextDay }: DateSelectProps) {
   const [showCalendar, setShowCalendar] = useState(false);
   const calendarRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);

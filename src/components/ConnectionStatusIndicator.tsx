@@ -1,67 +1,74 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { supabaseService, ConnectionStatus, ConnectionObserver } from '@/lib/supabase/service';
+import React, { useEffect, useState } from 'react';
+import { supabaseService } from '@/lib/supabase/service';
+import { ConnectionStatus } from '@/lib/supabase/service';
 
 interface ConnectionStatusIndicatorProps {
   showDetails?: boolean;
   className?: string;
 }
 
-export default function ConnectionStatusIndicator({ 
-  showDetails = false, 
-  className = '' 
-}: ConnectionStatusIndicatorProps) {
+/**
+ * Component that displays the current Supabase connection status
+ * with appropriate visual indicators.
+ */
+const ConnectionStatusIndicator: React.FC<ConnectionStatusIndicatorProps> = ({
+  showDetails = false,
+  className = ''
+}) => {
   const [status, setStatus] = useState<ConnectionStatus>(supabaseService.getStatus());
-  const [error, setError] = useState<string | undefined>();
-  const [expanded, setExpanded] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   
   useEffect(() => {
-    // Create observer object
-    const observer: ConnectionObserver = {
-      onConnectionStatusChanged: (newStatus, newError) => {
+    // Register as an observer to get status updates
+    const observer = {
+      onConnectionStatusChanged: (newStatus: ConnectionStatus, error?: Error) => {
         setStatus(newStatus);
-        setError(newError?.message);
+        setErrorMessage(error ? error.message : null);
+        setLastUpdated(new Date());
       }
     };
     
-    // Register observer
+    // Register with the service
     supabaseService.addObserver(observer);
     
     // Initial status check
-    setStatus(supabaseService.getStatus());
-    setError(supabaseService.getLastError()?.message);
+    const currentStatus = supabaseService.getStatus();
+    setStatus(currentStatus);
     
-    // Cleanup
+    // Cleanup on unmount
     return () => {
       supabaseService.removeObserver(observer);
     };
   }, []);
   
-  // Get status-specific styles
-  const getStatusColor = (status: ConnectionStatus): string => {
+  // Define colors based on status
+  const getStatusColor = () => {
     switch (status) {
       case 'connected':
         return 'bg-green-500';
       case 'connecting':
         return 'bg-yellow-500';
       case 'disconnected':
-        return 'bg-gray-500';
-      case 'error':
         return 'bg-red-500';
+      case 'error':
+        return 'bg-red-600';
       default:
         return 'bg-gray-500';
     }
   };
   
-  const getStatusText = (status: ConnectionStatus): string => {
+  // Get text indicator
+  const getStatusText = () => {
     switch (status) {
       case 'connected':
         return 'Connected';
       case 'connecting':
         return 'Connecting...';
       case 'disconnected':
-        return 'Disconnected';
+        return 'Offline';
       case 'error':
         return 'Connection Error';
       default:
@@ -69,66 +76,59 @@ export default function ConnectionStatusIndicator({
     }
   };
   
-  const handleReconnect = async () => {
-    try {
-      await supabaseService.reconnect();
-    } catch (error) {
-      console.error('Reconnection failed:', error);
-    }
+  // Format timestamp
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString();
   };
   
+  // Render the indicator
   return (
-    <div className={`relative ${className}`}>
-      {/* Simple indicator */}
-      <div 
-        className="flex items-center cursor-pointer" 
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div 
-          className={`h-3 w-3 rounded-full mr-2 ${getStatusColor(status)}`} 
-          title={getStatusText(status)}
-        />
-        {showDetails && (
-          <span className="text-xs font-medium">{getStatusText(status)}</span>
-        )}
-      </div>
+    <div className={`flex items-center ${className}`}>
+      <div className={`h-3 w-3 rounded-full ${getStatusColor()} mr-2`}></div>
       
-      {/* Expanded details panel */}
-      {expanded && (
-        <div className="absolute top-full right-0 mt-2 bg-white shadow-lg rounded-md p-3 z-50 w-64">
-          <div className="flex items-center mb-2">
-            <div className={`h-3 w-3 rounded-full mr-2 ${getStatusColor(status)}`} />
-            <span className="font-medium">{getStatusText(status)}</span>
+      {showDetails ? (
+        <div className="flex flex-col">
+          <div className="flex items-center">
+            <span className="font-medium">{getStatusText()}</span>
+            <span className="text-xs text-gray-500 ml-2">
+              ({formatTime(lastUpdated)})
+            </span>
           </div>
           
-          {error && (
-            <div className="text-xs text-red-600 mb-2 p-2 bg-red-50 rounded">
-              {error}
-            </div>
+          {errorMessage && status === 'error' && (
+            <span className="text-xs text-red-600 mt-1 max-w-xs truncate" title={errorMessage}>
+              {errorMessage.length > 50 ? `${errorMessage.substring(0, 50)}...` : errorMessage}
+            </span>
           )}
           
-          <div className="text-xs text-gray-500 mb-2">
-            {status === 'connected' ? (
-              'Supabase connection is healthy.'
-            ) : status === 'connecting' ? (
-              'Establishing connection to Supabase...'
-            ) : status === 'disconnected' ? (
-              'Not connected to Supabase. Some features may use fallback data.'
-            ) : (
-              'Connection error. The application will use fallback data where available.'
-            )}
-          </div>
+          {status === 'disconnected' && (
+            <span className="text-xs text-gray-600 mt-1">
+              Using fallback data
+            </span>
+          )}
           
-          {(status === 'disconnected' || status === 'error') && (
-            <button
-              onClick={handleReconnect}
-              className="w-full text-xs bg-blue-500 hover:bg-blue-600 text-white py-1 px-2 rounded transition-colors"
-            >
-              Reconnect
-            </button>
+          {status === 'connecting' && (
+            <span className="text-xs text-gray-600 mt-1">
+              Attempting to connect...
+            </span>
           )}
         </div>
+      ) : (
+        <span className="text-sm">{getStatusText()}</span>
+      )}
+      
+      {/* Optional retry button for error states */}
+      {(status === 'error' || status === 'disconnected') && (
+        <button 
+          onClick={() => supabaseService.reconnect()}
+          className="ml-3 text-xs bg-blue-500 hover:bg-blue-600 text-white py-1 px-2 rounded transition-colors"
+          title="Attempt to reconnect to the Supabase database"
+        >
+          Retry
+        </button>
       )}
     </div>
   );
-} 
+};
+
+export default ConnectionStatusIndicator; 

@@ -1,97 +1,78 @@
 # Teaching Scheduler Documentation
 
-This directory contains comprehensive documentation for the Teaching Scheduler application. These documents are maintained to provide a clear understanding of the project structure, components, data model, and development roadmap.
+Welcome to the Teaching Scheduler application documentation. This document provides an overview of the application, available documentation, and guidelines for development.
 
-## Data Source Priority
+## Overview
 
-The Teaching Scheduler application is designed to work primarily with the **Supabase "iWorld Scheduler" project** as its authoritative data source. All components first attempt to fetch live data from Supabase, with mock data used only as a fallback mechanism when the primary source is unavailable.
+Teaching Scheduler is a Next.js application designed to manage teaching schedules for educational institutions. It provides a user-friendly interface for viewing, creating, and managing teaching assignments and class schedules.
 
-- **Primary Data Source**: Supabase "iWorld Scheduler" project
-- **Fallback Only**: Mock data system (for development/offline scenarios)
+### Data Source Priority
 
-## MCP Integration
+1. **Supabase "iWorld Scheduler" project** - Primary data source
+2. **Mock data** - Fallback when Supabase is unavailable
 
-The application leverages Model Context Protocol (MCP) servers for various functions:
+The application includes robust error handling and will automatically fall back to mock data if the Supabase connection fails. Recent updates have enhanced case sensitivity handling and improved the reliability of data retrieval from the database.
 
-- **Development**: Console monitoring, debugging, and file system access
-- **Deployment**: Automated CI/CD pipeline and container orchestration
-- **Monitoring**: Runtime performance tracking and error detection
-- **Integration**: External API access and third-party service connectivity
+### MCP Integration
 
-MCP servers are prioritized over custom implementations to ensure standardized, secure, and maintainable functionality.
+The application uses MCP servers for:
+- Development support
+- Deployment and CI/CD
+- Monitoring and logging
+- Integration with other systems
 
 ## Available Documentation
 
-- **[Development Plan](development-plan.md)**: Outlines the project goals, development phases, and roadmap for the Teaching Scheduler application.
-- **[Status](status.md)**: Tracks the current progress of the project, including completed features, in-progress tasks, and next steps.
-- **[Architecture](architecture.md)**: Provides an overview of the system design, including key components and their relationships.
-- **[Components](components.md)**: Details the UI and page components that make up the application.
-- **[Data Structure](data-structure.md)**: Documents the data types, relationships, and storage mechanisms used in the application.
-- **[Tasks](tasks.md)**: Lists current and upcoming tasks organized by priority.
-- **[Deployment](deployment.md)**: Outlines the automated deployment strategy using MCP servers for CI/CD.
+- [Architecture](./architecture.md): System architecture and design decisions
+- [Components](./components.md): Detailed information about UI components
+- [Data Structure](./data-structure.md): Database schema and data flow
+- [Data Synchronization](./data-synchronization.md): Offline data handling and synchronization
+- [Deployment](./deployment.md): Deployment process and environments
+- [Development Plan](./development-plan.md): Roadmap and future enhancements
+- [Error Boundaries](./error-boundaries.md): Error handling and UI resilience
+- [Supabase Connectivity Troubleshooting](./supabase-connectivity-troubleshooting.md): Guide for resolving connection issues
+- [Tasks](./tasks.md): Current development tasks and priorities
 
-## How to Use This Documentation
+## Guidelines for New Developers
 
-### For New Developers
+1. Read through the documentation to understand the system architecture
+2. Set up your local environment following the instructions in the development plan
+3. Use the console monitor for debugging (see console-monitor-loader.md)
+4. Follow established coding patterns and conventions
+5. Test all changes thoroughly before submitting
 
-If you're new to the project:
-1. Start with the **Development Plan** to understand the project goals and roadmap
-2. Review the **Architecture** document to get an overview of the system design
-3. Explore the **Components** and **Data Structure** documents to understand the implementation details
-4. Check the **Status** document to see what's currently being worked on
-5. Review the **Tasks** list to find tasks you can contribute to
-6. Understand the **Deployment** process for testing and releasing your changes
+## Ongoing Development
 
-### For Ongoing Development
+1. When making changes, update relevant documentation
+2. Log all identified issues in the task tracker
+3. Add comprehensive error handling for all new features
+4. Include debugging information for complex components
+5. Ensure backward compatibility with existing data structures
 
-When continuing development:
-1. Check the **Status** document to understand the current state of the project
-2. Review the **Tasks** list to identify what needs to be done next
-3. Update the documentation as you make changes to the codebase
-4. Follow the deployment workflow outlined in the **Deployment** document
+## Code Reviews
 
-### For Code Reviews
+1. Code reviews should verify that documentation is updated
+2. Check for proper error handling and fallback mechanisms
+3. Ensure components handle both connected and disconnected states
+4. Verify that case sensitivity issues are handled appropriately
 
-When reviewing code changes:
-1. Reference the **Architecture** and **Components** documents to ensure changes align with the system design
-2. Check that changes follow the patterns documented in the **Data Structure** document
-3. Update the **Status** document after merging changes
-4. Verify that the changes will work with the automated deployment pipeline
+## Data Integration
 
-## Data Integration Guidelines
+The application now supports robust data integration with the Supabase backend:
+- Field names are handled in a case-insensitive manner
+- Teacher data is properly normalized between the database and UI
+- Connection retry logic improves reliability
+- Detailed debugging information is available in components
 
-When working with data in the Teaching Scheduler:
+## MCP Server Usage
 
-1. Always attempt to fetch data from the Supabase "iWorld Scheduler" project first
-2. Use mock data only as a fallback when Supabase is unavailable
-3. Provide clear error handling for connection issues
-4. Design components to work with real data, not mock representations
-5. Indicate in the UI when fallback data is being used
-
-## MCP Server Usage Guidelines
-
-When developing or extending the Teaching Scheduler:
-
-1. Leverage existing MCP servers instead of building custom solutions
-2. Use the console monitoring MCP server for debugging and performance tracking
-3. Follow the deployment MCP server configuration for automated deployments
-4. Contribute improvements to MCP server integrations when possible
-5. Document any new MCP server capabilities in the architecture document
+1. Refer to console-monitor-loader.md for monitoring capabilities
+2. Use the MCP server to validate deployment before pushing to production
+3. Monitor application logs through the MCP server
 
 ## Maintaining Documentation
 
-All documentation should be kept up-to-date as the codebase evolves. When making significant changes:
-
-1. Update relevant documentation files
-2. Ensure the **Status** document reflects the latest state of the project
-3. Update the **Tasks** list to reflect completed and new tasks
-4. Review and update the **Architecture** and **Data Structure** documents as needed
-
-## Documentation Format
-
-All documentation is written in Markdown format for easy reading and editing. When contributing to documentation:
-
-1. Use clear, concise language
-2. Include code examples where appropriate
-3. Use headings and lists to organize information
-4. Link to other relevant documentation files when referencing them 
+1. Update this document when making significant changes
+2. Add component-specific documentation for new major features
+3. Keep the tasks list current with completed and planned work
+4. Document all known issues and their workarounds 

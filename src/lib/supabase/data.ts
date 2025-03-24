@@ -1,8 +1,8 @@
-import { supabase } from './client';
-import { supabaseUrl, supabaseKey } from './client';
 import { supabaseService } from './service';
 
-// Define types for our data
+/**
+ * Types for data structures
+ */
 export interface Teacher {
   Teacher_ID: number;
   Teacher_name: string;
@@ -71,77 +71,93 @@ function isCacheValid<T>(cacheItem: { data: T; timestamp: number } | null): bool
 }
 
 // Define known tables for fallback
+// Using the exact table names from the Supabase database
 export const KNOWN_TABLES = [
   'Students-English',
   'Sprouts1-Course-Calendar',
   'Sprouts2-Course-Calendar',
-  'Clover1A-Course-Calendar', 
-  'Clover2A-Course-Calendar',
-  'Clover3A-Course-Calendar',
   'Guardians3-Course-Calendar',
+  'Clovers1A-Course-Calendar',
+  'Clovers2A-Course-Calendar',
   'Teachers'
 ];
+
+/**
+ * Log database operations with a consistent format
+ * @param message - Log message
+ * @param level - Log level (log, warn, error)
+ * @param data - Optional data to include
+ */
+function logDbOperation(message: string, level: 'log' | 'warn' | 'error' = 'log', data?: any): void {
+  const prefix = '[DB]';
+  const timestamp = new Date().toISOString();
+  
+  if (level === 'error') {
+    console.error(`${prefix} ${message}`, data !== undefined ? data : '');
+  } else if (level === 'warn') {
+    console.warn(`${prefix} ${message}`, data !== undefined ? data : '');
+  } else {
+    console.log(`${prefix} ${message}`, data !== undefined ? data : '');
+  }
+}
 
 /**
  * Fetches a list of all tables from the Supabase database
  */
 export async function getTables(): Promise<string[]> {
-  console.log('Starting database discovery...');
+  logDbOperation('Starting database discovery...');
   
   // Check if we're in offline mode - immediately return known tables
   if (supabaseService.isOffline()) {
-    console.log('In offline mode, using fallback table list');
+    logDbOperation('In offline mode, using fallback table list');
     return KNOWN_TABLES;
   }
   
   // Check cache first
   if (isCacheValid(cache.calendarTables)) {
-    console.log('Using cached table list');
+    logDbOperation('Using cached table list');
     return cache.calendarTables!.data;
   }
   
   try {
-    // Use the enhanced service with retry logic
-    return await supabaseService.executeQuery(async () => {
-      // Attempt to fetch tables from Supabase
-      const { data, error } = await supabaseService.getClient()
-        .from('information_schema.tables')
-        .select('table_name')
-        .eq('table_schema', 'public');
-      
-      if (error) {
-        console.error('Error fetching tables from database:', error);
-        console.log('Falling back to known tables list');
-        return KNOWN_TABLES;
-      }
-      
-      if (!data || data.length === 0) {
-        console.log('No tables found in database, using fallback list');
-        return KNOWN_TABLES;
-      }
-      
-      // Extract table names from the result
-      const tables = data.map(row => row.table_name);
-      console.log(`Found ${tables.length} tables in database:`, tables);
-      
-      // If we got an empty list, use fallback
-      if (tables.length === 0) {
-        console.log('Empty table list returned, using fallback list');
-        return KNOWN_TABLES;
-      }
-      
-      // Update cache
-      cache.calendarTables = {
-        data: tables,
-        timestamp: Date.now()
-      };
-      
-      return tables;
-    });
+    // Use the enhanced service to list tables
+    const tables = await supabaseService.listTables();
+    
+    if (tables.length === 0) {
+      logDbOperation('No tables found, using known table list', 'warn');
+      return KNOWN_TABLES;
+    }
+    
+    // Update the cache
+    cache.calendarTables = {
+      data: tables,
+      timestamp: Date.now()
+    };
+    
+    logDbOperation(`Discovered ${tables.length} tables`);
+    return tables;
   } catch (err) {
-    console.error('Error during table discovery:', err);
-    console.log('Using fallback table list due to error');
+    logDbOperation('Error during table discovery:', 'error', err);
+    logDbOperation('Using fallback table list due to error');
     return KNOWN_TABLES;
+  }
+}
+
+/**
+ * Validates if a table exists in the database
+ */
+export async function validateTableExists(tableName: string): Promise<boolean> {
+  // If we're in offline mode, check against known tables
+  if (supabaseService.isOffline()) {
+    return KNOWN_TABLES.includes(tableName);
+  }
+  
+  try {
+    const tables = await getTables();
+    return tables.includes(tableName);
+  } catch (err) {
+    // If there's an error, assume it exists if it's in the known tables list
+    return KNOWN_TABLES.includes(tableName);
   }
 }
 
@@ -149,38 +165,59 @@ export async function getTables(): Promise<string[]> {
  * Fetches data from a specific table with optional limit
  */
 export async function getTableData(tableName: string, limit: number = 10) {
-  console.log(`Attempting to fetch data from ${tableName}...`);
+  logDbOperation(`Attempting to fetch data from ${tableName}...`);
+  
+  // Validate table exists
+  const tableExists = await validateTableExists(tableName);
+  if (!tableExists) {
+    logDbOperation(`Table ${tableName} doesn't exist in the database or known tables list`, 'warn');
+    return {
+      data: [],
+      count: 0,
+      source: 'empty'
+    };
+  }
   
   // Check if we're in offline mode - immediately return fallback data
   if (supabaseService.isOffline()) {
-    console.log(`In offline mode, using fallback data for ${tableName}`);
-    return getFallbackData(tableName, limit);
+    logDbOperation(`In offline mode, using fallback data for ${tableName}`);
+    const fallbackResult = getFallbackData(tableName, limit);
+    return {
+      ...fallbackResult,
+      source: 'fallback'
+    };
   }
   
   // Check cache for calendar entries
   const isCourseCalendar = tableName.toLowerCase().includes('course-calendar');
-  if (isCourseCalendar && tableName in cache.calendarEntries && isCacheValid(cache.calendarEntries[tableName])) {
-    console.log(`Using cached data for ${tableName}`);
+  if (isCourseCalendar && 
+      tableName in cache.calendarEntries && 
+      isCacheValid(cache.calendarEntries[tableName])) {
+    logDbOperation(`Using cached data for ${tableName}`);
     const cachedData = cache.calendarEntries[tableName].data;
     return {
       data: cachedData.slice(0, limit),
-      count: cachedData.length
+      count: cachedData.length,
+      source: 'cache'
     };
   }
   
   // Check cache for teachers
   if (tableName === 'Teachers' && isCacheValid(cache.teachers)) {
-    console.log('Using cached teacher data');
+    logDbOperation('Using cached teacher data');
     const cachedData = cache.teachers!.data;
     return {
       data: cachedData.slice(0, limit),
-      count: cachedData.length
+      count: cachedData.length,
+      source: 'cache'
     };
   }
   
   try {
     // Use the enhanced service with retry logic
     return await supabaseService.executeQuery(async () => {
+      logDbOperation(`Executing query for ${tableName}`);
+      
       // Attempt to fetch data from Supabase
       const { data, error, count } = await supabaseService.getClient()
         .from(tableName)
@@ -188,14 +225,25 @@ export async function getTableData(tableName: string, limit: number = 10) {
         .limit(limit);
       
       if (error) {
-        console.error(`Error fetching data from ${tableName}:`, error);
-        console.log(`Falling back to mock data for ${tableName}`);
-        return getFallbackData(tableName, limit);
+        logDbOperation(`Error fetching data from ${tableName}:`, 'error', error);
+        
+        const fallbackResult = getFallbackData(tableName, limit);
+        return {
+          ...fallbackResult,
+          source: 'fallback',
+          error: error.message
+        };
       }
       
       if (!data || data.length === 0) {
-        console.log(`No data found in ${tableName}, using fallback data`);
-        return getFallbackData(tableName, limit);
+        logDbOperation(`No data found in ${tableName}, falling back`, 'warn');
+        
+        const fallbackResult = getFallbackData(tableName, limit);
+        return {
+          ...fallbackResult,
+          source: 'fallback',
+          reason: 'empty_result'
+        };
       }
       
       // Update cache based on table type
@@ -211,15 +259,23 @@ export async function getTableData(tableName: string, limit: number = 10) {
         };
       }
       
+      logDbOperation(`Successfully fetched ${data.length} rows from ${tableName}`);
       return {
         data,
-        count: count || data.length
+        count: count || data.length,
+        source: 'database'
       };
     });
   } catch (err) {
-    console.error(`Error fetching data from ${tableName}:`, err);
-    console.log(`Using fallback data for ${tableName} due to error`);
-    return getFallbackData(tableName, limit);
+    logDbOperation(`Error in executeQuery for ${tableName}:`, 'error', err);
+    
+    // Get fallback data
+    const fallbackResult = getFallbackData(tableName, limit);
+    return {
+      ...fallbackResult,
+      source: 'fallback',
+      error: err instanceof Error ? err.message : String(err)
+    };
   }
 }
 
@@ -227,396 +283,601 @@ export async function getTableData(tableName: string, limit: number = 10) {
  * Get fallback data for a given table
  */
 function getFallbackData(tableName: string, limit: number = 10) {
-  console.log(`Getting fallback data for ${tableName}`);
+  logDbOperation(`Getting fallback data for ${tableName}`);
   
-  if (tableName === 'Teachers') {
-    const mockData = getFallbackTeachers();
-    return {
-      data: mockData.slice(0, limit),
-      count: mockData.length
-    };
-  } else if (tableName.includes('Course-Calendar')) {
-    const mockData = getFallbackCalendar(tableName);
-    return {
-      data: mockData.slice(0, limit),
-      count: mockData.length
-    };
-  } else {
-    // Return empty data for unknown tables
+  // Only provide fallback data for known tables
+  if (!KNOWN_TABLES.includes(tableName)) {
+    logDbOperation(`Table ${tableName} is not in known tables list - returning empty data`, 'warn');
     return {
       data: [],
       count: 0
     };
   }
+  
+  // Provide appropriate fallback data based on table name
+  if (tableName === 'Teachers') {
+    const fallbackTeachers = getFallbackTeachers();
+    return {
+      data: fallbackTeachers.slice(0, limit),
+      count: fallbackTeachers.length
+    };
+  } else if (tableName === 'Students-English') {
+    const fallbackStudents = getFallbackStudents();
+    return {
+      data: fallbackStudents.slice(0, limit),
+      count: fallbackStudents.length
+    };
+  } else if (tableName.includes('Course-Calendar')) {
+    const calendarData = getFallbackCalendar(tableName);
+    return {
+      data: calendarData.slice(0, limit),
+      count: calendarData.length
+    };
+  }
+  
+  // Default fallback is empty array
+  logDbOperation(`No specific fallback for ${tableName}, returning empty data`, 'warn');
+  return {
+    data: [],
+    count: 0
+  };
 }
 
 /**
- * Fetches all teachers with caching
+ * Get all teachers
  */
 export async function getTeachers(): Promise<Teacher[]> {
-  console.log('Using mock teacher data without database connection');
-  return Promise.resolve(getFallbackTeachers());
+  try {
+    const result = await getTableData('Teachers', 100);
+    
+    // Log the result to help debug
+    logDbOperation(`getTeachers result: ${result.source}, count: ${result.count}`);
+    
+    if (!result.data || result.data.length === 0) {
+      logDbOperation('No teachers found in database, returning fallback data', 'warn');
+      return getFallbackTeachers();
+    }
+    
+    // Verify the data structure and ensure Teacher_ID is present
+    const teachers = result.data.map((teacher: any) => {
+      // If the ID field is missing, generate one
+      if (teacher.Teacher_ID === undefined) {
+        logDbOperation(`Teacher missing Teacher_ID: ${JSON.stringify(teacher)}`, 'warn');
+        return {
+          ...teacher,
+          Teacher_ID: Math.floor(Math.random() * 10000) + 1000, // Generate a random ID
+          Teacher_name: teacher.Teacher_name || 'Unknown Teacher',
+          Teacher_Type: teacher.Teacher_Type || 'Unknown'
+        };
+      }
+      return teacher;
+    });
+    
+    logDbOperation(`Returning ${teachers.length} teachers`);
+    return teachers as Teacher[];
+  } catch (err) {
+    logDbOperation('Error in getTeachers:', 'error', err);
+    return getFallbackTeachers();
+  }
 }
 
 /**
- * Returns a set of fallback teachers when the database is unavailable
+ * Generate fallback teacher data
  */
 function getFallbackTeachers(): Teacher[] {
-  console.log('Using fallback teacher data');
   return [
-    { Teacher_ID: 1, Teacher_name: 'Andrew', Teacher_Type: 'Native' },
-    { Teacher_ID: 2, Teacher_name: 'Emma', Teacher_Type: 'Native' },
-    { Teacher_ID: 3, Teacher_name: 'Michael', Teacher_Type: 'Native' },
-    { Teacher_ID: 4, Teacher_name: 'Liu Wei', Teacher_Type: 'Local' },
-    { Teacher_ID: 5, Teacher_name: 'Zhang Min', Teacher_Type: 'Local' },
-    { Teacher_ID: 6, Teacher_name: 'Wang Fang', Teacher_Type: 'Local' },
-    { Teacher_ID: 7, Teacher_name: 'Chen Jie', Teacher_Type: 'Local' },
-    { Teacher_ID: 8, Teacher_name: 'Sarah', Teacher_Type: 'Native' }
+    { Teacher_ID: 1, Teacher_name: 'John Smith', Department: 'English', Teacher_Type: 'Native' },
+    { Teacher_ID: 2, Teacher_name: 'Sarah Johnson', Department: 'English', Teacher_Type: 'Native' },
+    { Teacher_ID: 3, Teacher_name: 'Li Wei', Department: 'English', Teacher_Type: 'Local' },
+    { Teacher_ID: 4, Teacher_name: 'Wang Mei', Department: 'English', Teacher_Type: 'Local' },
+    { Teacher_ID: 5, Teacher_name: 'Robert Davis', Department: 'English', Teacher_Type: 'Native' },
   ];
 }
 
 /**
- * Returns a set of fallback students
+ * Generate fallback student data
  */
 function getFallbackStudents(): any[] {
   return [
-    { Student_ID: 1, Name: 'Zhang Wei', Grade: 3, Age: 9, Parent_Name: 'Zhang Ming' },
-    { Student_ID: 2, Name: 'Li Jun', Grade: 4, Age: 10, Parent_Name: 'Li Hua' },
-    { Student_ID: 3, Name: 'Wang Fang', Grade: 2, Age: 8, Parent_Name: 'Wang Jing' },
-    { Student_ID: 4, Name: 'Chen Yu', Grade: 5, Age: 11, Parent_Name: 'Chen Lei' },
-    { Student_ID: 5, Name: 'Liu Yang', Grade: 3, Age: 9, Parent_Name: 'Liu Mei' }
+    { Student_ID: 1, Student_name: 'Zhang Wei', Age: 7, Level: 'Sprouts1' },
+    { Student_ID: 2, Student_name: 'Li Na', Age: 8, Level: 'Sprouts2' },
+    { Student_ID: 3, Student_name: 'Chen Jie', Age: 9, Level: 'Guardians3' },
+    { Student_ID: 4, Student_name: 'Wang Fang', Age: 10, Level: 'Clovers1A' },
+    { Student_ID: 5, Student_name: 'Liu Yang', Age: 11, Level: 'Clovers2A' },
   ];
 }
 
 /**
- * Returns fallback calendar entries for a course
+ * Generate fallback calendar data
  */
 function getFallbackCalendar(tableName: string): CalendarEntry[] {
-  // Extract course type from table name (e.g., 'Clover2A' from 'Clover2A-Course-Calendar')
-  const courseTypeMatch = tableName.match(/^([^-]+)-Course-Calendar$/);
-  const courseType = courseTypeMatch ? courseTypeMatch[1] : 'Default';
+  // Extract level from table name
+  const levelMatch = tableName.match(/^([\w]+)(\d[\w]*)?-Course-Calendar$/);
+  const level = levelMatch ? levelMatch[1] + (levelMatch[2] || '') : 'Unknown';
   
-  console.log(`Generating fallback calendar data for ${courseType}`);
-  
-  // Generate class ID based on course type
   const generateClassId = (level: string, num: number) => {
-    const levelPrefix = level === 'Beginner' ? 'BEG' : level === 'Intermediate' ? 'INT' : 'ADV';
-    return `${courseType}-${levelPrefix}-${num}`;
+    return `${level}-${String(num).padStart(3, '0')}`;
   };
   
-  return [
-    { 
-      id: 1, 
-      Visit: 1, 
-      Date: '2025-03-15', 
-      Course: courseType, 
-      Level: 'Beginner', 
-      Day1: 'Monday', 
-      Day2: 'Wednesday', 
-      Start: '09:00', 
-      End: '10:30', 
-      Unit: 'Unit 1', 
-      'Class.ID': generateClassId('Beginner', 1), 
-      'NT-Led': true 
-    },
-    { 
-      id: 2, 
-      Visit: 2, 
-      Date: '2025-03-17', 
-      Course: courseType, 
-      Level: 'Intermediate', 
-      Day1: 'Tuesday', 
-      Day2: 'Thursday', 
-      Start: '13:00', 
-      End: '14:30', 
-      Unit: 'Unit 2', 
-      'Class.ID': generateClassId('Intermediate', 1), 
-      'NT-Led': false 
-    },
-    { 
-      id: 3, 
-      Visit: 3, 
-      Date: '2025-03-19', 
-      Course: courseType, 
-      Level: 'Advanced', 
-      Day1: 'Wednesday', 
-      Day2: 'Friday', 
-      Start: '15:00', 
-      End: '16:30', 
-      Unit: 'Unit 3', 
-      'Class.ID': generateClassId('Advanced', 1), 
-      'NT-Led': true 
-    }
-  ];
-}
-
-/**
- * Get a specific teacher by ID
- */
-export async function getTeacherById(teacherId: number): Promise<Teacher | null> {
-  console.log(`Finding teacher with ID: ${teacherId} from fallback data`);
-  const teacher = getFallbackTeachers().find(t => t.Teacher_ID === teacherId);
-  return Promise.resolve(teacher || null);
-}
-
-/**
- * Get teachers filtered by type (native or local)
- */
-export async function getTeachersByType(type: 'native' | 'local'): Promise<Teacher[]> {
-  // Check cache first
-  if (isCacheValid(cache.teachers)) {
-    const filteredTeachers = cache.teachers!.data.filter(t => t.Teacher_Type?.toLowerCase() === type);
-    if (filteredTeachers.length > 0) {
-      console.log(`Using cached ${type} teachers data`);
-      return filteredTeachers;
-    }
+  // Create a date for the current week starting Monday
+  const today = new Date();
+  const dayOfWeek = today.getDay() || 7; // Convert Sunday (0) to 7
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - dayOfWeek + 1); // Set to Monday
+  
+  const entries: CalendarEntry[] = [];
+  
+  // Generate 15 entries spanning 3 weeks
+  for (let i = 0; i < 15; i++) {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + Math.floor(i / 5) * 7 + (i % 5));
+    
+    // Alternate between morning and afternoon classes
+    const isAfternoon = i % 2 === 1;
+    
+    entries.push({
+      id: i + 1,
+      Visit: Math.floor(i / 5) + 1,
+      Date: date.toISOString().split('T')[0],
+      Course: level,
+      Level: level,
+      Day1: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'][i % 5],
+      Start: isAfternoon ? '14:00' : '09:00',
+      End: isAfternoon ? '16:00' : '11:00',
+      Unit: `Unit ${Math.floor(i / 3) + 1}`,
+      'Class.ID': generateClassId(level, i + 1),
+      'NT-Led': i % 3 === 0 // Every third class is NT-Led
+    });
   }
   
+  return entries;
+}
+
+/**
+ * Get a teacher by ID
+ */
+export async function getTeacherById(teacherId: number): Promise<Teacher | null> {
+  const teachers = await getTeachers();
+  return teachers.find(teacher => teacher.Teacher_ID === teacherId) || null;
+}
+
+/**
+ * Get teachers by type (native or local)
+ */
+export async function getTeachersByType(type: 'native' | 'local'): Promise<Teacher[]> {
   try {
-    console.log(`Fetching fresh ${type} teachers data`);
-    const { data, error } = await supabase
-      .from('Teachers')
-      .select('*')
-      .eq('Teacher_Type', type)
-      .order('Teacher_name');
-      
-    if (error) {
-      console.error(`Error fetching ${type} teachers:`, error);
-      throw new Error(error.message);
+    // If we're offline, use the fallback data
+    if (supabaseService.isOffline()) {
+      const teachers = getFallbackTeachers();
+      return teachers.filter(teacher => 
+        teacher.Teacher_Type?.toLowerCase() === type.toLowerCase()
+      );
     }
     
-    return data as Teacher[];
-  } catch (error) {
-    console.error(`Error fetching ${type} teachers:`, error);
-    throw error;
+    // Try to get from cache first
+    if (isCacheValid(cache.teachers)) {
+      logDbOperation('Using cached teacher data for filtering by type');
+      const cachedTeachers = cache.teachers!.data;
+      return cachedTeachers.filter(teacher => 
+        teacher.Teacher_Type?.toLowerCase() === type.toLowerCase()
+      );
+    }
+    
+    // Otherwise query from database with filtering
+    return await supabaseService.executeQuery(async () => {
+      const { data, error } = await supabaseService.getClient()
+        .from('Teachers')
+        .select('*')
+        .ilike('Teacher_Type', `%${type}%`);
+      
+      if (error) {
+        logDbOperation('Error fetching teachers by type:', 'error', error);
+        throw error;
+      }
+      
+      if (!data || data.length === 0) {
+        // Use fallback if no data found
+        const teachers = getFallbackTeachers();
+        return teachers.filter(teacher => 
+          teacher.Teacher_Type?.toLowerCase() === type.toLowerCase()
+        );
+      }
+      
+      return data as Teacher[];
+    });
+  } catch (err) {
+    logDbOperation('Error in getTeachersByType:', 'error', err);
+    
+    // Use fallback data
+    const teachers = getFallbackTeachers();
+    return teachers.filter(teacher => 
+      teacher.Teacher_Type?.toLowerCase() === type.toLowerCase()
+    );
   }
 }
 
 /**
- * Fetches calendar data for specific course calendar
+ * Get data from a specific calendar
  */
 export async function getCalendarData(calendarName: string, limit: number = 20) {
   try {
-    const { data, error } = await supabase
-      .from(calendarName)
-      .select('*')
-      .limit(limit);
-      
-    if (error) {
-      throw error;
+    // Validate that it's a calendar table
+    if (!calendarName.includes('Course-Calendar')) {
+      throw new Error(`Table ${calendarName} is not a calendar table`);
     }
     
-    return data as CalendarEntry[];
-  } catch (error) {
-    console.error(`Error fetching calendar data from ${calendarName}:`, error);
-    throw error;
+    return await getTableData(calendarName, limit);
+  } catch (err) {
+    logDbOperation(`Error in getCalendarData for ${calendarName}:`, 'error', err);
+    
+    // Use fallback calendar data
+    const calendarData = getFallbackCalendar(calendarName);
+    return {
+      data: calendarData.slice(0, limit),
+      count: calendarData.length,
+      source: 'fallback',
+      error: err instanceof Error ? err.message : String(err)
+    };
   }
 }
 
 /**
- * Fetches all calendar tables
+ * Get all tables that are calendar tables
  */
 export async function getAllCalendarTables(): Promise<string[]> {
   const tables = await getTables();
-  return tables.filter(table => table.includes('Calendar'));
+  return tables.filter(table => table.includes('Course-Calendar'));
 }
 
 /**
- * Get all calendar tables from the database using schema information
- * This uses dynamic discovery to find all tables with a calendar structure
+ * Get calendar tables that actually contain data
  */
 export async function getCalendarTables(): Promise<string[]> {
-  // Check cache first
-  if (isCacheValid(cache.calendarTables)) {
-    console.log('Using cached calendar tables list');
-    return cache.calendarTables!.data;
-  }
-  
   try {
-    console.log('Fetching fresh calendar tables list');
-    const tables = await getTables();
-    // Filter the tables list to only include those that appear to be calendar tables
-    // based on naming convention
-    const calendarTables = tables.filter(tableName => 
-      tableName.toLowerCase().includes('calendar') || 
-      tableName.toLowerCase().includes('course')
-    );
+    // If we're offline, return the known calendar tables
+    if (supabaseService.isOffline()) {
+      return KNOWN_TABLES.filter(table => table.includes('Course-Calendar'));
+    }
+    
+    // Check cache first
+    if (isCacheValid(cache.calendarTables)) {
+      const cachedTables = cache.calendarTables!.data;
+      return cachedTables.filter(table => table.includes('Course-Calendar'));
+    }
+    
+    // Otherwise, discovery calendar tables from the database
+    const allTables = await getTables();
+    const calendarTables = allTables.filter(table => table.includes('Course-Calendar'));
+    
+    // If no calendar tables found, use fallback
+    if (calendarTables.length === 0) {
+      return KNOWN_TABLES.filter(table => table.includes('Course-Calendar'));
+    }
     
     // Update cache
     cache.calendarTables = {
-      data: calendarTables,
+      data: allTables,
       timestamp: Date.now()
     };
     
-    console.log(`Found ${calendarTables.length} potential calendar tables through naming patterns`);
     return calendarTables;
-  } catch (error) {
-    console.error('Error fetching calendar tables:', error);
-    if (cache.calendarTables) {
-      // Return stale cache as fallback
-      console.log('Returning stale cached calendar tables as fallback');
-      return cache.calendarTables.data;
-    }
-    throw error;
+  } catch (err) {
+    logDbOperation('Error discovering calendar tables:', 'error', err);
+    
+    // Fall back to known tables
+    return KNOWN_TABLES.filter(table => table.includes('Course-Calendar'));
   }
 }
 
 /**
- * Get entries from a specific calendar by table name with optional filters
+ * Get calendar entries with optional filtering
  */
 export async function getCalendarEntries(
   tableName: string,
   filters?: { date?: string; teacherId?: number }
 ): Promise<CalendarEntry[]> {
-  // Generate cache key based on table name and filters
-  const cacheKey = `${tableName}:${filters?.date || ''}:${filters?.teacherId || ''}`;
-  
-  // Check cache first
-  if (cache.calendarEntries[cacheKey] && isCacheValid(cache.calendarEntries[cacheKey])) {
-    console.log(`Using cached calendar entries for ${cacheKey}`);
-    return cache.calendarEntries[cacheKey].data;
-  }
+  logDbOperation(`Fetching calendar entries from ${tableName}${filters ? ' with filters' : ''}`);
   
   try {
-    console.log(`Fetching calendar entries for ${cacheKey}`);
-    let query = supabase
-      .from(tableName)
-      .select('*');
-
-    // Apply optional filters
-    if (filters?.date) {
-      console.log(`Filtering by date: ${filters.date} in table ${tableName}`);
-      query = query.eq('Date', filters.date);
+    // Validate it's a calendar table
+    if (!tableName.includes('Course-Calendar')) {
+      throw new Error(`Table ${tableName} is not a calendar table`);
     }
     
-    // For teacher filter, we need to get the teacher name and type first
-    if (filters?.teacherId) {
-      const teacher = await getTeacherById(filters.teacherId);
+    // If we're offline, use fallback data
+    if (supabaseService.isOffline()) {
+      logDbOperation(`In offline mode, using fallback calendar for ${tableName}`);
+      let entries = getFallbackCalendar(tableName);
       
-      if (teacher) {
-        // Filter based on teacher type and name
-        const isNativeTeacher = teacher.Teacher_Type?.toLowerCase() === 'native';
-        const teacherName = teacher.Teacher_name;
-        
-        console.log(`Filtering for teacher: ${teacherName} (${isNativeTeacher ? 'native' : 'local'})`);
-        
-        if (isNativeTeacher) {
-          // For Native teachers like Andrew:
-          // We're now removing this filter since we want to fetch ALL entries
-          // and do the filtering in getTeacherSchedule instead
-          // This ensures we get all NT-Led classes regardless of teacher assignment
-          
-          // Just for backward compatibility, include a very loose filter
-          // that will essentially return all entries
-          query = query.or(`eq(id,id)`);
-        } else {
-          // For Local teachers:
-          // We can still use this filter since they only teach classes
-          // where they are explicitly assigned
-          query = query
-            .eq('NT-Led', false)
-            .or(`eq(Day1,"${teacherName}"),eq(Day2,"${teacherName}")`);
+      // Apply filters to fallback data
+      if (filters) {
+        if (filters.date) {
+          entries = entries.filter(entry => entry.Date === filters.date);
+        }
+        if (filters.teacherId !== undefined) {
+          // In fallback data, just use a simple assignment rule based on ID
+          entries = entries.filter(entry => {
+            // Assign teachers based on a pattern
+            const entryId = entry.id || 0;
+            return (entryId % 5) + 1 === filters.teacherId;
+          });
         }
       }
-    }
-    
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error(`Error fetching calendar entries from ${tableName}:`, error);
-      throw error;
-    }
-    
-    // Process the data to normalize boolean values
-    // Some databases might return NT-Led as 'yes'/'no' strings instead of true/false
-    const processedData = data.map(entry => {
-      const processed = { ...entry };
       
-      // Convert 'yes'/'no' strings to boolean values for NT-Led
-      if (processed['NT-Led'] !== undefined) {
-        if (typeof processed['NT-Led'] === 'string') {
-          if (processed['NT-Led'].toLowerCase() === 'yes') {
-            processed['NT-Led'] = true;
-          } else if (processed['NT-Led'].toLowerCase() === 'no') {
-            processed['NT-Led'] = false;
+      return entries;
+    }
+    
+    // Check cache for calendar entries
+    if (tableName in cache.calendarEntries && isCacheValid(cache.calendarEntries[tableName])) {
+      logDbOperation(`Using cached entries for ${tableName}`);
+      let entries = cache.calendarEntries[tableName].data;
+      
+      // Apply filters to cached data
+      if (filters) {
+        if (filters.date) {
+          entries = entries.filter(entry => entry.Date === filters.date);
+        }
+        if (filters.teacherId !== undefined) {
+          entries = entries.filter(entry => {
+            // This assumes there's a teacher ID field in the entry
+            // Adapt this based on the actual data structure
+            return entry.Teacher_ID === filters.teacherId || 
+                   entry.TeacherID === filters.teacherId ||
+                   entry.teacherId === filters.teacherId;
+          });
+        }
+      }
+      
+      return entries;
+    }
+    
+    // Query from database with filters
+    return await supabaseService.executeQuery(async () => {
+      let query = supabaseService.getClient()
+        .from(tableName)
+        .select('*');
+      
+      // Apply filters
+      if (filters) {
+        if (filters.date) {
+          query = query.eq('Date', filters.date);
+        }
+        if (filters.teacherId !== undefined) {
+          // Try different teacher ID field names
+          // Adapt this query based on the actual field name in the database
+          query = query.or(`Teacher_ID.eq.${filters.teacherId},TeacherID.eq.${filters.teacherId},teacherId.eq.${filters.teacherId}`);
+        }
+      }
+      
+      const { data, error } = await query;
+      
+      if (error) {
+        logDbOperation(`Error fetching calendar entries from ${tableName}:`, 'error', error);
+        throw error;
+      }
+      
+      if (!data || data.length === 0) {
+        logDbOperation(`No calendar entries found in ${tableName}, using fallback`, 'warn');
+        let entries = getFallbackCalendar(tableName);
+        
+        // Apply filters to fallback data
+        if (filters) {
+          if (filters.date) {
+            entries = entries.filter(entry => entry.Date === filters.date);
+          }
+          if (filters.teacherId !== undefined) {
+            // In fallback data, just use a simple assignment rule based on ID
+            entries = entries.filter(entry => {
+              const entryId = entry.id || 0;
+              return (entryId % 5) + 1 === filters.teacherId;
+            });
           }
         }
+        
+        return entries;
       }
       
-      return processed;
+      // Cache the unfiltered results
+      if (!filters) {
+        cache.calendarEntries[tableName] = {
+          data: data as CalendarEntry[],
+          timestamp: Date.now()
+        };
+      }
+      
+      return data as CalendarEntry[];
     });
+  } catch (err) {
+    logDbOperation(`Error in getCalendarEntries for ${tableName}:`, 'error', err);
     
-    console.log(`Retrieved ${processedData.length} entries from ${tableName} with filters: ${JSON.stringify(filters || {})}`);
+    // Use fallback calendar data with filters
+    let entries = getFallbackCalendar(tableName);
     
-    // Update cache
-    cache.calendarEntries[cacheKey] = {
-      data: processedData as CalendarEntry[],
-      timestamp: Date.now()
-    };
+    // Apply filters to fallback data
+    if (filters) {
+      if (filters.date) {
+        entries = entries.filter(entry => entry.Date === filters.date);
+      }
+      if (filters.teacherId !== undefined) {
+        entries = entries.filter(entry => {
+          const entryId = entry.id || 0;
+          return (entryId % 5) + 1 === filters.teacherId;
+        });
+      }
+    }
     
-    return processedData as CalendarEntry[];
-  } catch (error) {
-    console.error(`Error fetching calendar entries from ${tableName}:`, error);
-    throw error;
+    return entries;
   }
 }
 
 /**
  * Get a teacher's schedule for a specific date
- * This handles different teacher types differently
  */
 export async function getTeacherSchedule(
   teacherId: number,
   date: string
 ): Promise<CalendarEntry[]> {
-  // Cache key for this specific request
-  const cacheKey = `schedule:${teacherId}:${date}`;
+  logDbOperation(`Fetching schedule for teacher ID ${teacherId} on ${date}`);
   
-  // Check cache first
-  if (cache.calendarEntries[cacheKey] && isCacheValid(cache.calendarEntries[cacheKey])) {
-    console.log(`Using cached teacher schedule for ${cacheKey}`);
-    return cache.calendarEntries[cacheKey].data;
+  try {
+    // Get all calendar tables
+    const calendarTables = await getCalendarTables();
+    
+    if (calendarTables.length === 0) {
+      logDbOperation('No calendar tables found, using fallback data', 'warn');
+      
+      // If no tables found, generate some fallback data
+      const fallbackTable = 'Fallback-Course-Calendar';
+      const entries = getFallbackCalendar(fallbackTable).filter(entry => {
+        const entryId = entry.id || 0;
+        return entry.Date === date && (entryId % 5) + 1 === teacherId;
+      });
+      
+      return entries;
+    }
+    
+    // Get entries from all calendars and combine them
+    const allEntries: CalendarEntry[] = [];
+    
+    // Use Promise.all for parallel queries
+    const entryPromises = calendarTables.map(tableName => 
+      getCalendarEntries(tableName, { date, teacherId })
+        .catch(err => {
+          logDbOperation(`Error fetching from ${tableName}:`, 'error', err);
+          return [] as CalendarEntry[]; // Return empty on error
+        })
+    );
+    
+    const results = await Promise.all(entryPromises);
+    
+    // Combine all entries
+    results.forEach(entries => {
+      allEntries.push(...entries);
+    });
+    
+    // Sort by start time
+    return allEntries.sort((a, b) => {
+      const aStart = a.Start || '';
+      const bStart = b.Start || '';
+      return aStart.localeCompare(bStart);
+    });
+  } catch (err) {
+    logDbOperation(`Error in getTeacherSchedule for teacher ${teacherId}:`, 'error', err);
+    
+    // Fallback to a generic schedule
+    const fallbackTable = 'Fallback-Course-Calendar';
+    const entries = getFallbackCalendar(fallbackTable).filter(entry => {
+      const entryId = entry.id || 0;
+      return entry.Date === date && (entryId % 5) + 1 === teacherId;
+    });
+    
+    return entries;
+  }
+}
+
+/**
+ * Discover the database schema by examining tables and their columns
+ */
+export async function discoverDatabaseSchema(): Promise<{tables: string[]; structure: Record<string, any>}> {
+  logDbOperation('Discovering database schema...');
+  
+  // If offline, return a static schema based on known tables
+  if (supabaseService.isOffline()) {
+    logDbOperation('In offline mode, using static schema');
+    
+    const structure: Record<string, any> = {};
+    
+    // Add known tables to the structure
+    KNOWN_TABLES.forEach(tableName => {
+      const isCalendarTable = tableName.includes('Course-Calendar');
+      
+      structure[tableName] = {
+        tableName,
+        columns: isCalendarTable 
+          ? ['id', 'Visit', 'Date', 'Course', 'Level', 'Day1', 'Day2', 'Start', 'End', 'Unit', 'Class.ID', 'NT-Led'] 
+          : (tableName === 'Teachers' 
+              ? ['Teacher_ID', 'Teacher_name', 'Department', 'Teacher_Type'] 
+              : ['Student_ID', 'Student_name', 'Age', 'Level']),
+        isCalendarTable,
+        description: isCalendarTable 
+          ? `Calendar for ${tableName.replace('-Course-Calendar', '')} courses` 
+          : (tableName === 'Teachers' ? 'Teacher records' : 'Student records')
+      };
+    });
+    
+    return {
+      tables: KNOWN_TABLES,
+      structure
+    };
   }
   
   try {
-    console.log(`Building teacher schedule for ${cacheKey}`);
+    // Get all tables first
+    const tables = await supabaseService.listTables();
     
-    // Get teacher details to determine type
-    const teacher = await getTeacherById(teacherId);
-    if (!teacher) {
-      throw new Error(`Teacher with ID ${teacherId} not found`);
+    if (tables.length === 0) {
+      logDbOperation('No tables found during schema discovery, using known tables', 'warn');
+      return discoverDatabaseSchema(); // This will trigger the offline path
     }
     
-    const isNativeTeacher = teacher.Teacher_Type?.toLowerCase() === 'native';
-    const teacherName = teacher.Teacher_name;
-    console.log(`Teacher schedule lookup: ${teacherName} (${isNativeTeacher ? 'Native' : 'Local'}) for date ${date}`);
+    // Structure to hold all table information
+    const structure: Record<string, any> = {};
     
-    // Get a list of all calendar tables
-    const calendarTables = await getCalendarTables();
-    
-    // Get a list of all calendar entries for the teacher
-    const entries = await getCalendarEntries(teacherName, { date });
-    
-    // Filter entries based on teacher type
-    const filteredEntries = entries.filter(entry => {
-      if (isNativeTeacher) {
-        // For Native teachers, include all entries
-        return true;
-      } else {
-        // For Local teachers, include entries where the teacher is explicitly assigned
-        return entry.Day1 === teacherName || entry.Day2 === teacherName;
+    // For each table, get column information
+    const tablePromises = tables.map(async (tableName) => {
+      try {
+        // Try to get a sample row to infer columns
+        const { data, error } = await supabaseService.getClient()
+          .from(tableName)
+          .select('*')
+          .limit(1);
+          
+        if (error) {
+          logDbOperation(`Error getting columns for ${tableName}:`, 'error', error);
+          return;
+        }
+        
+        const columns = data && data.length > 0 
+          ? Object.keys(data[0]) 
+          : [];
+          
+        const isCalendarTable = tableName.includes('Course-Calendar');
+        
+        structure[tableName] = {
+          tableName,
+          columns,
+          isCalendarTable,
+          description: isCalendarTable 
+            ? `Calendar for ${tableName.replace('-Course-Calendar', '')} courses` 
+            : (tableName === 'Teachers' ? 'Teacher records' : tableName)
+        };
+      } catch (tableErr) {
+        logDbOperation(`Error examining table ${tableName}:`, 'error', tableErr);
       }
     });
     
-    // Update cache
-    cache.calendarEntries[cacheKey] = {
-      data: filteredEntries,
-      timestamp: Date.now()
-    };
+    // Wait for all table examinations to complete
+    await Promise.all(tablePromises);
     
-    return filteredEntries;
-  } catch (error) {
-    console.error(`Error fetching teacher schedule:`, error);
-    throw error;
+    logDbOperation(`Schema discovery complete: ${tables.length} tables found`);
+    return {
+      tables,
+      structure
+    };
+  } catch (err) {
+    logDbOperation('Error during schema discovery:', 'error', err);
+    
+    // Fall back to offline mode
+    return discoverDatabaseSchema(); // This will trigger the offline path since we'll set offline mode
   }
+}
+
+/**
+ * Clear all cached data
+ */
+export function clearCache() {
+  cache.teachers = null;
+  cache.calendarTables = null;
+  cache.calendarEntries = {};
+  logDbOperation('Cache cleared');
 }

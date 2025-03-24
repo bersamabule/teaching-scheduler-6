@@ -146,3 +146,47 @@ The next.config.js file contains:
 
 - **March 24, 2025**: Updated document with implemented fixes for environment variable consistency and database ping method
 - **March 23, 2025**: Initial troubleshooting document created, tracking all attempted fixes to date 
+
+## Common Issues
+
+### Connection Failures
+
+If the connection to Supabase fails, the application will automatically:
+1. Attempt to reconnect up to 3 times with exponential backoff
+2. Fall back to using mock data if all connection attempts fail
+3. Continue to periodically check connectivity in the background
+
+### Environment Variable Consistency
+
+- The application looks for `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in the environment
+- For backward compatibility, it will also check for `NEXT_PUBLIC_SUPABASE_KEY`
+- Ensure these environment variables are correctly set in both development and production
+
+### Case Sensitivity in Data Structures
+
+The application now handles different case variations in field names from the Supabase database:
+
+- For teachers data, it checks multiple case variations:
+  - `Teacher_ID` / `TEACHER_ID` / `teacher_id`
+  - `Teacher_name` / `TEACHER_NAME` / `teacher_name`
+  - `Teacher_Type` / `TEACHER_TYPE` / `teacher_type`
+  - `Department` / `DEPARTMENT` / `department`
+
+- When using the `TeacherSelect` component, teacher types are normalized to ensure proper categorization:
+  - "native"/"NATIVE"/"Native" → "Native"
+  - "local"/"LOCAL"/"Local" → "Local"
+
+## Debugging Techniques
+
+1. Check the console logs for connection status and errors
+2. Use the built-in debug panel in the TeacherSelect component
+3. Examine the Network tab in browser DevTools for API calls to Supabase
+4. Verify that the data being returned from Supabase has the expected structure
+
+## Recent Updates (2023-11-07)
+
+- Enhanced case-insensitive field name handling in data retrieval
+- Improved debugging in TeacherSelect component
+- Fixed issues with teacher dropdown display and Z-index
+- Added comprehensive teacher type normalization for consistent filtering
+- Implemented better error logging for database connection issues 

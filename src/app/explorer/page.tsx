@@ -1,10 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getTables, getTableData, KNOWN_TABLES } from '@/lib/supabase/data';
+import { useState, useEffect, useMemo } from 'react';
+import { getTables, getTableData, KNOWN_TABLES, discoverDatabaseSchema, clearCache } from '@/lib/supabase/data';
 import { supabaseService, ConnectionStatus } from '@/lib/supabase/service';
 import ConnectionStatusIndicator from '@/components/ConnectionStatusIndicator';
-import ErrorBoundary from '@/components/ErrorBoundary';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import FallbackIndicator from '@/components/FallbackIndicator';
+import SynchronizationIndicator from '@/components/SynchronizationIndicator';
+import LoadingIndicator from '@/components/LoadingIndicator';
+import LoadingOverlay from '@/components/LoadingOverlay';
+import SkeletonLoader from '@/components/SkeletonLoader';
 
 // Simple fallback data for tables
 const FALLBACK_DATA: Record<string, any[]> = {
@@ -17,6 +22,15 @@ const FALLBACK_DATA: Record<string, any[]> = {
   ]
 };
 
+// Define column type for the schema view
+interface ColumnInfo {
+  name: string;
+  type: string;
+  nullable?: boolean;
+  default?: string;
+  inferred?: boolean;
+}
+
 export default function ExplorerPage() {
   const [tables, setTables] = useState<string[]>([]);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
@@ -27,6 +41,10 @@ export default function ExplorerPage() {
   const [debugMessages, setDebugMessages] = useState<string[]>([]);
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
   const [isOfflineMode, setIsOfflineMode] = useState<boolean>(false);
+  const [databaseStructure, setDatabaseStructure] = useState<Record<string, any> | null>(null);
+  const [showSchemaView, setShowSchemaView] = useState<boolean>(false);
+  const [isDiscoveringSchema, setIsDiscoveringSchema] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<'data' | 'schema'>('data');
   
   // Add log function for debugging
   const log = (message: string) => {
@@ -68,6 +86,10 @@ export default function ExplorerPage() {
       try {
         log('Starting database analysis...');
         
+        // Clear any existing cache to ensure fresh data
+        clearCache();
+        log('Cache cleared to ensure fresh data from database');
+        
         // Update connection message
         updateConnectionMessage();
         
@@ -75,9 +97,15 @@ export default function ExplorerPage() {
         try {
           const tablesList = await getTables();
           log(`Found ${tablesList.length} tables`);
-          setTables(tablesList);
+          
+          // Only show tables that actually exist in the database
           if (supabaseService.isOffline()) {
+            log('Using fallback tables list in offline mode');
+            setTables(KNOWN_TABLES);
             setError('Using fallback data in offline mode');
+          } else {
+            // These are the actual tables from the database
+            setTables(tablesList);
           }
         } catch (tableError) {
           log('Error fetching tables: ' + (tableError instanceof Error ? tableError.message : String(tableError)));
@@ -100,6 +128,34 @@ export default function ExplorerPage() {
       onConnectionStatusChanged: (status: ConnectionStatus, error?: Error) => {
         log(`Connection status changed to: ${status}${error ? ` (${error.message})` : ''}`);
         updateConnectionMessage();
+      },
+      onSynchronizationStart: () => {
+        log('Data synchronization started');
+      },
+      onSynchronizationComplete: () => {
+        log('Data synchronization completed, reloading data');
+        // Reload tables
+        loadDatabaseSchema();
+        // Reload table data if a table is selected
+        if (selectedTable) {
+          // Use the existing function to load table data
+          if (selectedTable) {
+            setLoading(true);
+            setError(null);
+            getTableData(selectedTable)
+              .then(({ data, count }) => {
+                setTableData(data);
+                setTableCount(count);
+                log(`Loaded ${data.length} rows from ${selectedTable} (total: ${count})`);
+              })
+              .catch((dataError) => {
+                log('Error loading table data: ' + (dataError instanceof Error ? dataError.message : String(dataError)));
+              })
+              .finally(() => {
+                setLoading(false);
+              });
+          }
+        }
       }
     };
     
@@ -109,7 +165,7 @@ export default function ExplorerPage() {
     return () => {
       supabaseService.removeObserver(observer);
     };
-  }, []);
+  }, [selectedTable]);
   
   // Load table data when a table is selected
   useEffect(() => {
@@ -174,8 +230,20 @@ export default function ExplorerPage() {
       const connected = await supabaseService.reconnect();
       if (connected) {
         log('Connection successful. Reloading database schema...');
-        // Reload tables
+        
+        // Force a refresh of table list by clearing cache
+        try {
+          log('Clearing table cache to get fresh data...');
+          // Use the exported clearCache function
+          clearCache();
+          log('Cache cleared successfully');
+        } catch (cacheError) {
+          log('Error clearing cache: ' + (cacheError instanceof Error ? cacheError.message : String(cacheError)));
+        }
+        
+        // Reload tables - these are the actual tables from the database
         const tablesList = await getTables();
+        log(`Loaded ${tablesList.length} tables from database`);
         setTables(tablesList);
         setConnectionMessage('Connected to Supabase database');
         setError(null);
@@ -186,15 +254,328 @@ export default function ExplorerPage() {
         setError('Failed to connect to database. Using fallback data.');
         // Make sure tables are set to fallback
         setTables(KNOWN_TABLES);
+        setIsOfflineMode(true);
       }
     } catch (err) {
       log('Error during reconnection: ' + (err instanceof Error ? err.message : String(err)));
       setError('Failed to reconnect to database. Using fallback data.');
       setTables(KNOWN_TABLES);
+      setIsOfflineMode(true);
     } finally {
       setLoading(false);
     }
   };
+  
+  // Add a function to discover the complete database schema
+  const handleDiscoverSchema = async () => {
+    log('Starting deep database schema discovery...');
+    setIsDiscoveringSchema(true);
+    setError(null);
+    
+    try {
+      const { tables: discoveredTables, structure } = await discoverDatabaseSchema();
+      log(`Discovered ${discoveredTables.length} tables in database`);
+      
+      setTables(discoveredTables);
+      setDatabaseStructure(structure);
+      setShowSchemaView(true);
+      setError(null);
+      setIsOfflineMode(false);
+    } catch (err) {
+      log('Error during schema discovery: ' + (err instanceof Error ? err.message : String(err)));
+      setError('Failed to discover database schema. Using fallback data.');
+      setIsOfflineMode(true);
+    } finally {
+      setIsDiscoveringSchema(false);
+    }
+  };
+  
+  // Error handling callbacks
+  const handleTableListError = (error: Error, errorInfo: React.ErrorInfo) => {
+    log(`Table List Error: ${error.message}`);
+    console.error("Table List Error Details:", errorInfo);
+  };
+
+  const handleTableDataError = (error: Error, errorInfo: React.ErrorInfo) => {
+    log(`Table Data Error: ${error.message}`);
+    console.error("Table Data Error Details:", errorInfo);
+  };
+
+  const handleSchemaViewError = (error: Error, errorInfo: React.ErrorInfo) => {
+    log(`Schema View Error: ${error.message}`);
+    console.error("Schema View Error Details:", errorInfo);
+  };
+  
+  // Render table data
+  const renderTableData = () => {
+    if (loading) {
+      return (
+        <div className="p-4">
+          <SkeletonLoader type="table" count={5} />
+        </div>
+      );
+    }
+
+    if (!tableData || tableData.length === 0) {
+      return (
+        <div className="text-gray-500 p-4 bg-gray-50 rounded">
+          No data found in table {selectedTable}
+          {error && <p className="text-red-500 mt-2">{error}</p>}
+        </div>
+      );
+    }
+
+    return (
+      <div className="p-4">
+        <p className="text-sm text-gray-500 mb-4">
+          Showing {tableData.length} of {tableCount} rows
+          {error && <span className="text-orange-500 ml-2">{error}</span>}
+        </p>
+        
+        <div className="overflow-x-auto w-full">
+          <table className="table-auto border-collapse">
+            <thead>
+              <tr className="bg-gray-50">
+                {Object.keys(tableData[0] || {}).map(column => (
+                  <th key={column} className="p-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-200 min-w-[150px]">
+                    {column}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tableData.map((row, rowIndex) => (
+                <tr 
+                  key={rowIndex} 
+                  className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
+                >
+                  {Object.values(row).map((value, valueIndex) => (
+                    <td 
+                      key={valueIndex} 
+                      className="p-2 text-sm border border-gray-200 whitespace-normal truncate min-w-[150px]"
+                    >
+                      {value === null 
+                        ? <span className="text-gray-400 italic">null</span>
+                        : typeof value === 'boolean'
+                          ? value ? 'true' : 'false'
+                          : typeof value === 'object'
+                            ? JSON.stringify(value)
+                            : String(value)
+                      }
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  // Render schema view
+  const renderSchemaView = () => {
+    if (!databaseStructure || !selectedTable || !databaseStructure[selectedTable]) {
+      return (
+        <div className="p-4 text-center text-gray-500">
+          No schema information available for this table.
+        </div>
+      );
+    }
+
+    const tableInfo = databaseStructure[selectedTable];
+
+    return (
+      <div className="p-4">
+        <div className="mb-4 bg-gray-50 p-2 rounded text-sm">
+          <div className="flex items-center">
+            <span className="font-medium mr-2">Table Status:</span>
+            <span className={`text-xs px-2 py-1 rounded ${tableInfo.exists ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
+              {tableInfo.exists ? 'Exists' : 'Not Verified'}
+            </span>
+            {tableInfo.source && (
+              <span className="text-xs text-gray-500 ml-2">
+                Source: {tableInfo.source}
+              </span>
+            )}
+          </div>
+        </div>
+        
+        {tableInfo.columns && tableInfo.columns.length > 0 ? (
+          <div className="overflow-x-auto w-full">
+            <table className="table-auto border-collapse text-sm">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="p-1 text-left text-xs font-medium text-gray-500 border border-gray-200 min-w-[150px]">Name</th>
+                  <th className="p-1 text-left text-xs font-medium text-gray-500 border border-gray-200 min-w-[150px]">Type</th>
+                  <th className="p-1 text-left text-xs font-medium text-gray-500 border border-gray-200 min-w-[100px]">Nullable</th>
+                  <th className="p-1 text-left text-xs font-medium text-gray-500 border border-gray-200 min-w-[150px]">Default</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(tableInfo.columns as ColumnInfo[]).map((column: ColumnInfo, i: number) => (
+                  <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="p-1 border border-gray-200 min-w-[150px]">{column.name}</td>
+                    <td className="p-1 border border-gray-200 min-w-[150px]">
+                      <span className={column.inferred ? 'text-amber-600 italic' : ''}>
+                        {column.type}
+                        {column.inferred && ' (inferred)'}
+                      </span>
+                    </td>
+                    <td className="p-1 border border-gray-200 min-w-[100px]">
+                      {column.nullable !== undefined ? 
+                        (column.nullable ? 'Yes' : 'No') : 
+                        '-'}
+                    </td>
+                    <td className="p-1 border border-gray-200 min-w-[150px] truncate">
+                      {column.default !== undefined ? column.default : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No column information available</p>
+        )}
+        
+        {tableInfo.sample && (
+          <div className="mt-3">
+            <div className="text-xs font-medium text-gray-500 mb-1">Sample Data:</div>
+            <div className="bg-gray-50 p-2 rounded overflow-x-auto">
+              <pre className="text-xs">{JSON.stringify(tableInfo.sample, null, 2)}</pre>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  
+  // Render the page
+  const renderMainContent = () => {
+    return (
+      <div className="flex flex-col space-y-4">
+        {/* Table List Section */}
+        <ErrorBoundary onError={handleTableListError}>
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="p-4 border-b bg-gray-50">
+              <div className="flex justify-between items-center">
+                <h2 className="text-lg font-medium text-gray-900">Database Tables</h2>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={handleDiscoverSchema}
+                    className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                  >
+                    Discover Schema
+                  </button>
+                  <button
+                    onClick={() => clearCache()}
+                    className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
+                  >
+                    Clear Cache
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              {/* Existing table list rendering */}
+              <div className="p-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                {loading && tables.length === 0 ? (
+                  <SkeletonLoader type="list" count={8} className="p-2" />
+                ) : tables.length === 0 ? (
+                  <div className="text-red-500 text-sm p-3 bg-red-50 rounded">
+                    No tables found. Check database connection.
+                  </div>
+                ) : (
+                  tables.map((table) => (
+                    <button
+                      key={table}
+                      onClick={() => setSelectedTable(table)}
+                      className={`px-3 py-2 text-sm rounded text-left ${
+                        selectedTable === table
+                          ? 'bg-indigo-100 text-indigo-800 font-medium'
+                          : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      {table}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </ErrorBoundary>
+
+        {/* Selected Table Data or Schema View */}
+        {selectedTable && (
+          <ErrorBoundary onError={handleTableDataError}>
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+              <div className="p-4 border-b bg-gray-50">
+                <div className="flex justify-between items-center">
+                  <h2 className="text-lg font-medium text-gray-900">
+                    Table: <span className="text-indigo-600">{selectedTable}</span>
+                  </h2>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => setViewMode(viewMode === 'data' ? 'schema' : 'data')}
+                      className="px-3 py-1 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                    >
+                      {viewMode === 'data' ? 'View Schema' : 'View Data'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (selectedTable) {
+                          setLoading(true);
+                          setError(null);
+                          getTableData(selectedTable)
+                            .then(({ data, count }) => {
+                              setTableData(data);
+                              setTableCount(count);
+                              log(`Loaded ${data.length} rows from ${selectedTable} (total: ${count})`);
+                            })
+                            .catch((dataError) => {
+                              log('Error loading table data: ' + (dataError instanceof Error ? dataError.message : String(dataError)));
+                            })
+                            .finally(() => {
+                              setLoading(false);
+                            });
+                        }
+                      }}
+                      className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Render data or schema based on view mode */}
+              {viewMode === 'data' ? (
+                renderTableData()
+              ) : (
+                <ErrorBoundary onError={handleSchemaViewError}>
+                  {renderSchemaView()}
+                </ErrorBoundary>
+              )}
+            </div>
+          </ErrorBoundary>
+        )}
+      </div>
+    );
+  };
+  
+  // Register/unregister component when using fallback data
+  useEffect(() => {
+    if (isOfflineMode) {
+      supabaseService.registerFallbackUsage('DatabaseExplorer');
+    } else {
+      supabaseService.unregisterFallbackUsage('DatabaseExplorer');
+    }
+    
+    return () => {
+      supabaseService.unregisterFallbackUsage('DatabaseExplorer');
+    };
+  }, [isOfflineMode]);
   
   // Render the page
   return (
@@ -202,7 +583,7 @@ export default function ExplorerPage() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Database Explorer</h1>
         
-        <div className="flex items-center">
+        <div className="flex items-center gap-2">
           <ConnectionStatusIndicator showDetails className="mr-4" />
           
           <button
@@ -210,25 +591,23 @@ export default function ExplorerPage() {
             disabled={loading}
             className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded disabled:opacity-50"
           >
-            {loading ? 'Loading...' : 'Refresh Connection'}
+            {loading ? (
+              <LoadingIndicator type="spinner" size="small" className="mx-2" />
+            ) : (
+              'Refresh Connection'
+            )}
           </button>
         </div>
       </div>
       
+      {/* Add synchronization indicator */}
+      <div className="mb-4">
+        <SynchronizationIndicator position="top" />
+      </div>
+      
       {isOfflineMode && (
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-300 text-amber-700 rounded">
-          <div className="flex items-center">
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <div>
-              <p className="font-semibold">Offline Mode Active</p>
-              <p className="text-sm">
-                The application is currently using fallback data because the database connection is unavailable.
-                This ensures you can still view and work with sample data until the connection is restored.
-              </p>
-            </div>
-          </div>
+        <div className="mb-4">
+          <FallbackIndicator position="top" showDetails={true} className="rounded-md" />
         </div>
       )}
       
@@ -261,12 +640,7 @@ export default function ExplorerPage() {
             <h3 className="text-lg font-semibold mb-4">Tables</h3>
             
             {loading && tables.length === 0 ? (
-              <div className="animate-pulse">
-                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded w-5/6 mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded w-2/3 mb-2"></div>
-              </div>
+              <SkeletonLoader type="list" count={8} className="p-2" />
             ) : tables.length === 0 ? (
               <div className="text-red-500 text-sm p-3 bg-red-50 rounded">
                 No tables found. Check database connection.
@@ -280,7 +654,10 @@ export default function ExplorerPage() {
                       p-2 text-sm rounded cursor-pointer
                       ${selectedTable === table ? 'bg-indigo-100 text-indigo-700 font-medium' : 'hover:bg-gray-100'}
                     `}
-                    onClick={() => setSelectedTable(table)}
+                    onClick={() => {
+                      setSelectedTable(table);
+                      setShowSchemaView(false);
+                    }}
                   >
                     {table}
                   </li>
@@ -291,71 +668,7 @@ export default function ExplorerPage() {
         </ErrorBoundary>
         
         <ErrorBoundary>
-          <div className="md:col-span-3 bg-white p-4 rounded shadow">
-            {!selectedTable ? (
-              <div className="text-center text-gray-500 p-8">
-                Select a table to view its details
-              </div>
-            ) : loading ? (
-              <div className="animate-pulse">
-                <div className="h-6 bg-gray-200 rounded w-1/3 mb-4"></div>
-                <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-              </div>
-            ) : !tableData || tableData.length === 0 ? (
-              <div className="text-gray-500 p-4 bg-gray-50 rounded">
-                No data found in table {selectedTable}
-                {error && <p className="text-red-500 mt-2">{error}</p>}
-              </div>
-            ) : (
-              <div>
-                <h3 className="text-lg font-semibold mb-2">{selectedTable}</h3>
-                <p className="text-sm text-gray-500 mb-4">
-                  Showing {tableData.length} of {tableCount} rows
-                  {error && <span className="text-orange-500 ml-2">{error}</span>}
-                </p>
-                
-                <div className="overflow-x-auto">
-                  <table className="min-w-full table-auto border-collapse">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        {Object.keys(tableData[0] || {}).map(column => (
-                          <th key={column} className="p-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-200">
-                            {column}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tableData.map((row, rowIndex) => (
-                        <tr 
-                          key={rowIndex} 
-                          className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
-                        >
-                          {Object.values(row).map((value, valueIndex) => (
-                            <td 
-                              key={valueIndex} 
-                              className="p-2 text-sm border border-gray-200 whitespace-normal truncate max-w-xs"
-                            >
-                              {value === null 
-                                ? <span className="text-gray-400 italic">null</span>
-                                : typeof value === 'boolean'
-                                  ? value ? 'true' : 'false'
-                                  : typeof value === 'object'
-                                    ? JSON.stringify(value)
-                                    : String(value)
-                              }
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
+          {renderMainContent()}
         </ErrorBoundary>
       </div>
       

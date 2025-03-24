@@ -1,4 +1,36 @@
-# Teaching Scheduler Tasks
+# Teaching Scheduler Development Tasks
+
+This document tracks ongoing development tasks for the Teaching Scheduler application.
+
+## Completed Tasks
+
+- [x] Create basic UI framework with Next.js and Tailwind CSS
+- [x] Implement Supabase connection and data services
+- [x] Add ConnectionStatusIndicator component
+- [x] Configure MCP server for development and monitoring
+- [x] Implement database explorer for direct data inspection
+- [x] Fix case sensitivity issues with teacher data retrieval
+- [x] Enhance TeacherSelect component with improved error handling and debugging
+- [x] Improve Supabase service with better connection retry logic
+- [x] Implement error boundaries around critical UI components
+- [x] Add comprehensive documentation for error boundary implementation
+
+## Current Tasks
+
+- [ ] Complete calendar view implementation
+- [ ] Add schedule editing functionality
+- [ ] Implement user authentication and authorization
+- [ ] Create administrative dashboard
+- [ ] Add reporting features for teacher scheduling
+- [ ] Implement notifications for schedule changes
+
+## Planned Tasks
+
+- [ ] Mobile-responsive enhancements for tablet and phone usage
+- [ ] Offline mode with data synchronization
+- [ ] Integration with the school's existing systems
+- [ ] Implement PDF export for schedules
+- [ ] Add multi-language support
 
 ## Current Sprint Tasks
 
@@ -23,14 +55,15 @@
 
 - [ ] Enhance fallback mechanisms (for offline/disconnected scenarios only)
   - [x] Basic fallback system for connection failures
-  - [ ] UI indicators when using fallback data
-  - [ ] Synchronization when connection is restored
+  - [x] UI indicators when using fallback data
+  - [x] Synchronization when connection is restored
 
 - [ ] Implement error boundaries
-  - [ ] Add error boundary around main schedule view
-  - [ ] Add error boundary around database explorer
-  - [ ] Add global error fallback component
-  - [ ] Integrate error reporting with MCP console monitor
+  - [x] Add error boundary around main schedule view
+  - [x] Add error boundary around database explorer
+  - [x] Add global error fallback component
+  - [x] Integrate error reporting with MCP console monitor
+  - [x] Document error boundary implementation and best practices
 
 - [ ] Fix remaining UI issues
   - [x] Optimize header layout

@@ -26,8 +26,32 @@
 **Features:**
 - Displays classes in a time-slot grid
 - Shows teacher assignments for each class
-- Highlights classes based on teacher type
-- Provides visual indicators for special class types
+- Comprehensive color-coding system for different course types:
+  - Sprouts classes (purple)
+  - Clovers classes (green)
+  - Guardians classes (blue)
+  - Workshop classes (amber)
+  - Advanced-level classes (rose/pink)
+- Differentiates NT-Led and Local Teacher classes with color intensity
+- Advanced filtering capabilities:
+  - Filter by course type (Sprouts, Clovers, Guardians, etc.)
+  - Filter by NT-Led status
+  - Clear visual indicators for active filters
+- Interactive class detail view with modal display
+- Synchronizes with offline/online status for data consistency
+- Shows class counts and NT-Led counts for each day
+
+### ConnectionStatusIndicator
+**Location:** `src/components/ConnectionStatusIndicator.tsx`
+**Purpose:** Displays the current status of the Supabase database connection.
+**Features:**
+- Real-time visual feedback on connection status (Connected, Connecting, Error)
+- Color-coded status indicators (green, yellow, red)
+- Click-to-retry functionality
+- Toast notifications for status changes
+- Detailed error display on hover/click
+- Automatic retry with exponential backoff
+- Integration with session context for global state management
 
 ### ConsoleMonitor
 **Location:** `src/components/ConsoleMonitor.tsx`
@@ -36,6 +60,17 @@
 - Integrates with MCP server
 - Displays logs in a clean, organized format
 - Filters logs by type (error, warning, info)
+
+### ConsoleMonitorLoader
+**Location:** `src/components/ConsoleMonitorLoader.tsx`
+**Purpose:** Injects the console monitoring script into the browser.
+**Features:**
+- Client-side only component
+- Overrides browser console methods to capture logs
+- Forwards logs to the MCP server via API routes
+- Captures unhandled errors and promise rejections
+- Works silently in the background with zero UI impact
+- Initializes only once per session
 
 ## Page Components
 
@@ -73,8 +108,10 @@
 **Features:**
 - Catches runtime errors in components
 - Displays fallback UI when errors occur
-- Logs errors for debugging
-- Allows users to retry failed components
+- Logs errors to console monitor
+- Provides retry functionality
+- Supports custom fallback components
+- Includes automatic retry for transient errors
 
 ### LoadingIndicator
 **Location:** `src/components/LoadingIndicator.tsx`
@@ -98,10 +135,49 @@ The components are organized in a hierarchical structure:
 
 1. Page components (`page.tsx`) serve as containers and manage overall state
 2. Main UI components (TeacherSelect, WeeklyCalendar) implement core functionality
-3. Utility components (ErrorBoundary, LoadingIndicator) provide support functions
+3. Utility components (ErrorBoundary, ConnectionStatusIndicator) provide support functions
+4. Background components (ConsoleMonitorLoader) operate silently to enhance functionality
+
+## Component Design Principles
 
 All components follow these design principles:
 - Self-contained with minimal dependencies
 - Responsive design for different screen sizes
 - Fallback behaviors for error states
-- Consistent visual language and interaction patterns 
+- Consistent visual language and interaction patterns
+
+## FallbackIndicator
+
+The `FallbackIndicator` component provides a visual alert when the application is using local fallback data due to connectivity issues with the Supabase database.
+
+### Props
+
+- `position`: Position of the indicator - either 'top' (full width banner) or 'inline' (compact badge)
+- `showDetails`: Whether to display additional information and actions
+- `className`: Additional CSS classes to apply to the component
+
+### Features
+
+- Automatically monitors connection status via Supabase service
+- Only displays when offline/fallback mode is active
+- Provides a reconnect button when details are shown
+- Clear, consistent styling across the application
+- Unobtrusive, yet noticeable indication of fallback mode
+
+### Integration Points
+
+The FallbackIndicator is integrated in several key components:
+- TeacherSelect component (inline position)
+- Schedule page (top position with details)
+- Database Explorer page (top position with details)
+- WeeklyCalendar component (inline position)
+
+### Example Usage
+
+```tsx
+// Top banner with details
+<FallbackIndicator position="top" showDetails={true} />
+
+// Inline indicator without details
+<FallbackIndicator position="inline" showDetails={false} />
+``` 

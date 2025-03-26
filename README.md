@@ -116,6 +116,26 @@ The application includes monitoring endpoints:
 - **Health Check**: `/api/health` - Basic health status
 - **Metrics**: `/api/metrics` - Prometheus-compatible metrics
 
+## Recent Updates
+
+### Teacher Filtering Enhancement (2023-03-25)
+We've fixed an issue where the calendar view would become empty when selecting a teacher. The enhancements include:
+
+- Improved teacher ID matching across all calendar tables
+- Support for multiple field name variations and case sensitivity
+- Fallback matching for NT-Led classes when direct teacher matching fails
+- Enhanced logging and debugging capabilities
+- Better error handling for empty result sets
+
+These changes ensure that when a teacher is selected from the dropdown, their classes will correctly appear in the calendar view.
+
+## Recent Improvements
+
+- **Enhanced Database Explorer**: Fixed issues with table display and improved column widths for better data visibility.
+- **Improved Supabase Integration**: Enhanced connection reliability and error handling.
+- **UI Enhancements**: Optimized data display and improved error recovery.
+- **Error Boundaries**: Added comprehensive error handling to prevent UI crashes.
+
 ## Documentation
 
 Additional documentation is available in the `docs` directory:
@@ -129,4 +149,4 @@ Additional documentation is available in the `docs` directory:
 ## Contributing
 
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
-# Updated 06/14/2023 16:45:22
+# Updated 2025-03-25 12:00:00

@@ -1,6 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseKey, supabase } from './client';
 
+// Define default tables for offline mode - EXACT MATCH with database
+const DEFAULT_TABLES = [
+  'Teachers',
+  'Students-English',
+  'Sprouts1-Course-Calendar',
+  'Sprouts2-Course-Calendar',
+  'Clovers1A-Course-Calendar',
+  'Clovers2A-Course-Calendar',
+  'Guardians3-Course-Calendar'
+];
+
 /**
  * Status of the Supabase connection
  */
@@ -167,8 +178,7 @@ export class SupabaseService {
           // Race the query against the timeout
           const queryPromise = this.client
             .from(table)
-            .select('count', { count: 'exact', head: true })
-            .limit(1);
+            .select('count', { count: 'exact', head: true });
             
           const result = await Promise.race([queryPromise, timeoutPromise]) as any;
           
@@ -458,32 +468,118 @@ export class SupabaseService {
    */
   public async listTables(): Promise<string[]> {
     if (this.useOfflineMode) {
-      return [];
+      console.log('[DB] Using default tables list for offline mode');
+      return DEFAULT_TABLES;
     }
-    
+
     try {
-      const { data, error } = await this.client.rpc('get_tables');
-      
-      if (error) {
-        console.error('[DB] Error listing tables:', error);
-        // Try alternative approach using schema information
-        const { data: schemaData, error: schemaError } = await this.client
-          .from('information_schema.tables')
-          .select('table_name')
-          .eq('table_schema', 'public');
-          
-        if (schemaError) {
-          console.error('[DB] Error listing tables from schema:', schemaError);
-          return [];
+      // Check for non-existent client
+      if (!this.client) {
+        console.log('[DB] No client available, using default tables list');
+        return DEFAULT_TABLES;
+      }
+
+      let discoveredTables: string[] = [];
+
+      // First attempt: via RPC
+      try {
+        console.log('[DB] Attempting to list tables via RPC');
+        // Check if rpc method exists on client
+        if ('rpc' in this.client && typeof this.client.rpc === 'function') {
+          const { data, error } = await this.client.rpc('get_tables');
+          if (!error && data) {
+            discoveredTables = Array.isArray(data) ? data.map((row: any) => row.table_name) : [];
+            console.log('[DB] Successfully retrieved tables via RPC:', discoveredTables);
+            if (discoveredTables.length > 0) {
+              return discoveredTables;
+            }
+          }
+        } else {
+          console.log('[DB] rpc method not available on client');
         }
+      } catch (err) {
+        console.warn('[DB] Failed to list tables via RPC:', err);
+      }
+
+      // Second attempt: via information_schema
+      try {
+        console.log('[DB] Attempting to list tables via information_schema');
+        const query = this.client.from('information_schema.tables').select('table_name');
         
-        return (schemaData || []).map(row => row.table_name);
+        // Check if the query object has the eq method (type guard)
+        if ('eq' in query && typeof query.eq === 'function') {
+          const response = await query.eq('table_schema', 'public');
+          
+          if (!response.error && response.data) {
+            discoveredTables = response.data.map((row: {table_name: string}) => row.table_name);
+            console.log('[DB] Successfully retrieved tables via information_schema:', discoveredTables);
+            if (discoveredTables.length > 0) {
+              return discoveredTables;
+            }
+          }
+        } else {
+          // Fallback if eq method isn't available - just try to get all tables
+          const response = await query;
+          
+          if (!response.error && response.data) {
+            // Filter for public schema tables manually
+            discoveredTables = response.data
+              .filter((row: any) => row.table_schema === 'public')
+              .map((row: {table_name: string}) => row.table_name);
+              
+            console.log('[DB] Successfully retrieved tables via information_schema (without filter):', discoveredTables);
+            if (discoveredTables.length > 0) {
+              return discoveredTables;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[DB] Failed to list tables via information_schema:', err);
+      }
+
+      // Final attempt: directly probe tables that actually exist in the database
+      console.log('[DB] Attempting to detect tables by direct queries');
+      let detectedTables: string[] = [];
+      
+      // List of EXACT tables that exist in the Supabase database (from table editor screenshot)
+      const tablesToCheck = [
+        'Teachers',
+        'Students-English',
+        'Sprouts1-Course-Calendar',
+        'Sprouts2-Course-Calendar',
+        'Clovers1A-Course-Calendar',
+        'Clovers2A-Course-Calendar', // Fixed from 1B/2 to 2A
+        'Guardians3-Course-Calendar' // Fixed to only include Guardians3
+      ];
+      
+      // Check each table by directly querying it
+      for (const tableName of tablesToCheck) {
+        try {
+          const { error } = await this.client
+            .from(tableName)
+            .select('count', { count: 'exact', head: true });
+          
+          if (!error) {
+            detectedTables.push(tableName);
+          }
+        } catch (err) {
+          // Ignore errors and continue to next table
+        }
       }
       
-      return data || [];
+      if (detectedTables.length > 0) {
+        console.log(`[DB] Detected ${detectedTables.length} tables via direct queries:`, detectedTables);
+        return detectedTables;
+      }
+      
+      // Only if all methods failed and we're potentially offline
+      console.warn('[DB] All methods to list tables failed, app might be offline');
+      this.useOfflineMode = true; // Set offline mode since we couldn't connect
+      return DEFAULT_TABLES;
     } catch (error) {
-      console.error('[DB] Error listing tables:', this.formatError(error));
-      return [];
+      console.error('[DB] Unexpected error in listTables:', this.formatError(error));
+      this.useOfflineMode = true; // Set offline mode since we couldn't connect
+      return DEFAULT_TABLES;
     }
   }
 

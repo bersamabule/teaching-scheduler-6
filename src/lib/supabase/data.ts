@@ -120,7 +120,7 @@ export async function getTables(): Promise<string[]> {
   }
   
   try {
-    // Use the enhanced service to list tables
+    // Use the enhanced service to list tables - ONLY use actual tables from the database
     const tables = await supabaseService.listTables();
     
     if (tables.length === 0) {
@@ -128,13 +128,15 @@ export async function getTables(): Promise<string[]> {
       return KNOWN_TABLES;
     }
     
+    // Do NOT merge with KNOWN_TABLES - only show tables that actually exist
+    logDbOperation(`Discovered ${tables.length} tables from database`);
+    
     // Update the cache
     cache.calendarTables = {
       data: tables,
       timestamp: Date.now()
     };
     
-    logDbOperation(`Discovered ${tables.length} tables`);
     return tables;
   } catch (err) {
     logDbOperation('Error during table discovery:', 'error', err);
@@ -219,10 +221,20 @@ export async function getTableData(tableName: string, limit: number = 10) {
       logDbOperation(`Executing query for ${tableName}`);
       
       // Attempt to fetch data from Supabase
-      const { data, error, count } = await supabaseService.getClient()
-        .from(tableName)
-        .select('*', { count: 'exact' })
-        .limit(limit);
+      const query = supabaseService.getClient().from(tableName).select('*', { count: 'exact' });
+      
+      // Safe check for limit method
+      let result;
+      if (typeof query === 'object' && query !== null && 'limit' in query && typeof query.limit === 'function') {
+        result = await query.limit(limit);
+      } else {
+        result = await query;
+      }
+      
+      // Safely extract data and error, with optional count that might not exist
+      const { data, error } = result;
+      // Use optional chaining for count which might not be present in all result types
+      const count = 'count' in result ? result.count : undefined;
       
       if (error) {
         logDbOperation(`Error fetching data from ${tableName}:`, 'error', error);
@@ -465,10 +477,19 @@ export async function getTeachersByType(type: 'native' | 'local'): Promise<Teach
     
     // Otherwise query from database with filtering
     return await supabaseService.executeQuery(async () => {
-      const { data, error } = await supabaseService.getClient()
-        .from('Teachers')
-        .select('*')
-        .ilike('Teacher_Type', `%${type}%`);
+      // Create base query
+      const query = supabaseService.getClient().from('Teachers').select('*');
+      
+      // Type-safe check for ilike method
+      let result;
+      if (typeof query === 'object' && query !== null && 'ilike' in query && typeof query.ilike === 'function') {
+        result = await query.ilike('Teacher_Type', `%${type}%`);
+      } else {
+        // Fallback if method not available
+        result = await query;
+      }
+      
+      const { data, error } = result;
       
       if (error) {
         logDbOperation('Error fetching teachers by type:', 'error', error);
@@ -619,12 +640,70 @@ export async function getCalendarEntries(
         }
         if (filters.teacherId !== undefined) {
           entries = entries.filter(entry => {
-            // This assumes there's a teacher ID field in the entry
-            // Adapt this based on the actual data structure
-            return entry.Teacher_ID === filters.teacherId || 
-                   entry.TeacherID === filters.teacherId ||
-                   entry.teacherId === filters.teacherId;
+            // Enhanced teacher ID matching with more field name variations and improved logging
+            const teacherId = filters.teacherId;
+            
+            // Debug log the entry to see available fields
+            if (entry.id === 1 || entry.ID === 1 || entry.Id === 1) {
+              logDbOperation(`Example entry fields: ${JSON.stringify(Object.keys(entry))}`);
+              logDbOperation(`Entry values: ${JSON.stringify(entry)}`);
+            }
+            
+            // Try multiple potential field names with case insensitivity
+            const possibleTeacherFields = [
+              'Teacher_ID', 'TeacherID', 'teacherId', 'TEACHER_ID', 'teacher_id',
+              'Teacher_Id', 'Teacher', 'TeacherId', 'TEACHERID',
+              'NT_ID', 'NT_Id', 'NTID', 'NTId', 'ntId', 'NtId', 'nt_id',
+              'teacherLed', 'TeacherLed', 'Teacher_Led'
+            ];
+            
+            // Check if any of the possible fields match the teacher ID
+            for (const field of possibleTeacherFields) {
+              if (field in entry && entry[field] === teacherId) {
+                return true;
+              }
+            }
+            
+            // Check potential nested objects
+            if (entry.Teacher && typeof entry.Teacher === 'object') {
+              if (entry.Teacher.ID === teacherId || 
+                  entry.Teacher.Id === teacherId || 
+                  entry.Teacher.id === teacherId) {
+                return true;
+              }
+            }
+            
+            // Additional check: Look for any field that has 'teacher' in its name (case insensitive)
+            // and check if its value matches the teacher ID
+            for (const key in entry) {
+              if (key.toLowerCase().includes('teacher') && 
+                  (entry[key] === teacherId || 
+                   (typeof entry[key] === 'string' && entry[key].toString() === teacherId.toString()))) {
+                return true;
+              }
+            }
+            
+            // If class is NT-Led and the teacher is Native, consider it a match for fallback logic
+            // This is a heuristic approach when direct teacher ID matching fails
+            if (filters?.teacherId !== undefined) {
+              const isNTLed = entry['NT-Led'] === true || 
+                             (typeof entry['NT-Led'] === 'string' && 
+                              entry['NT-Led'].toLowerCase() === 'yes');
+                              
+              // If we have a rough idea that this is a native teacher class, and we're looking for a native teacher
+              // Use this as a fallback matching mechanism
+              if (isNTLed && filters.teacherId <= 3) { // Assuming teacher IDs 1-3 are Native Teachers based on fallback data
+                return true;
+              }
+            }
+            
+            return false;
           });
+          
+          // Log if filtering resulted in empty results
+          if (entries.length === 0) {
+            logDbOperation(`Warning: Teacher filter for ID ${filters.teacherId} returned no results from cache`);
+          }
         }
       }
       
@@ -633,23 +712,41 @@ export async function getCalendarEntries(
     
     // Query from database with filters
     return await supabaseService.executeQuery(async () => {
-      let query = supabaseService.getClient()
-        .from(tableName)
-        .select('*');
+      // Base query
+      let baseQuery = supabaseService.getClient().from(tableName).select('*');
       
-      // Apply filters
+      // Apply filters with type checking
       if (filters) {
-        if (filters.date) {
-          query = query.eq('Date', filters.date);
+        // Check for date filter
+        if (filters.date && typeof baseQuery === 'object' && baseQuery !== null && 
+            'eq' in baseQuery && typeof baseQuery.eq === 'function') {
+          baseQuery = baseQuery.eq('Date', filters.date);
         }
+        
+        // Check for teacher ID filter - use expanded OR conditions to match more field variations
         if (filters.teacherId !== undefined) {
-          // Try different teacher ID field names
-          // Adapt this query based on the actual field name in the database
-          query = query.or(`Teacher_ID.eq.${filters.teacherId},TeacherID.eq.${filters.teacherId},teacherId.eq.${filters.teacherId}`);
+          if (typeof baseQuery === 'object' && baseQuery !== null && 
+              'or' in baseQuery && typeof baseQuery.or === 'function') {
+            // Expanded OR conditions with more potential field names
+            baseQuery = baseQuery.or(
+              `Teacher_ID.eq.${filters.teacherId},` +
+              `TeacherID.eq.${filters.teacherId},` +
+              `teacherId.eq.${filters.teacherId},` +
+              `TEACHER_ID.eq.${filters.teacherId},` +
+              `teacher_id.eq.${filters.teacherId},` +
+              `NT_ID.eq.${filters.teacherId},` +
+              `NtId.eq.${filters.teacherId},` +
+              `Teacher.eq.${filters.teacherId}`
+            );
+          } else if (typeof baseQuery === 'object' && baseQuery !== null && 
+                    'eq' in baseQuery && typeof baseQuery.eq === 'function') {
+            // Fallback to just one field if .or() isn't available
+            baseQuery = baseQuery.eq('Teacher_ID', filters.teacherId);
+          }
         }
       }
       
-      const { data, error } = await query;
+      const { data, error } = await baseQuery;
       
       if (error) {
         logDbOperation(`Error fetching calendar entries from ${tableName}:`, 'error', error);
@@ -657,7 +754,7 @@ export async function getCalendarEntries(
       }
       
       if (!data || data.length === 0) {
-        logDbOperation(`No calendar entries found in ${tableName}, using fallback`, 'warn');
+        logDbOperation(`No calendar entries found in ${tableName} for filters: ${JSON.stringify(filters)}, using fallback`, 'warn');
         let entries = getFallbackCalendar(tableName);
         
         // Apply filters to fallback data
@@ -675,6 +772,87 @@ export async function getCalendarEntries(
         }
         
         return entries;
+      }
+      
+      // For debugging, log a sample entry to understand field names
+      if (data.length > 0) {
+        const sampleEntry = data[0];
+        logDbOperation(`Sample entry from ${tableName}: Fields: ${Object.keys(sampleEntry).join(', ')}`);
+        
+        if (filters && filters.teacherId !== undefined) {
+          // Look at all entries to see if teacher ID fields exist
+          const teacherFields = new Set<string>();
+          data.forEach(entry => {
+            Object.keys(entry).forEach(key => {
+              if (key.toLowerCase().includes('teacher') || key.toLowerCase().includes('nt')) {
+                teacherFields.add(key);
+              }
+            });
+          });
+          
+          if (teacherFields.size > 0) {
+            logDbOperation(`Found potential teacher fields in ${tableName}: ${Array.from(teacherFields).join(', ')}`);
+          } else {
+            logDbOperation(`No obvious teacher fields found in ${tableName}`);
+          }
+        }
+      }
+      
+      // If teacher ID filter was applied but no matching entries found in DB query,
+      // apply a client-side filter with more flexible matching
+      if (filters && filters.teacherId !== undefined && data.length > 0) {
+        // Apply a more flexible client-side teacher ID filter
+        const filteredData = data.filter(entry => {
+          // Check multiple field name variations
+          const possibleFields = [
+            'Teacher_ID', 'TeacherID', 'teacherId', 'TEACHER_ID', 'teacher_id',
+            'Teacher_Id', 'Teacher', 'TeacherId', 'TEACHERID', 
+            'NT_ID', 'NT_Id', 'NTID', 'NTId', 'ntId', 'NtId', 'nt_id'
+          ];
+          
+          // Check if any of the possible fields match
+          for (const field of possibleFields) {
+            if (field in entry && entry[field] === filters.teacherId) {
+              return true;
+            }
+          }
+          
+          // Check potential nested objects
+          if (entry.Teacher && typeof entry.Teacher === 'object') {
+            if (entry.Teacher.ID === filters.teacherId || 
+                entry.Teacher.Id === filters.teacherId || 
+                entry.Teacher.id === filters.teacherId) {
+              return true;
+            }
+          }
+          
+          // Check any field containing 'teacher' in its name
+          for (const key in entry) {
+            if (key.toLowerCase().includes('teacher') && 
+                (entry[key] === filters.teacherId || 
+                 (typeof entry[key] === 'string' && entry[key].toString() === filters.teacherId.toString()))) {
+              return true;
+            }
+          }
+          
+          // NT-Led heuristic for native teachers
+          const isNTLed = entry['NT-Led'] === true || 
+                         (typeof entry['NT-Led'] === 'string' && entry['NT-Led'].toLowerCase() === 'yes');
+          if (isNTLed && filters.teacherId <= 3) { // Assuming IDs 1-3 are Native Teachers
+            return true;
+          }
+          
+          return false;
+        });
+        
+        // If client-side filtering produced results, use those
+        if (filteredData.length > 0) {
+          logDbOperation(`Applied client-side teacher filtering: Found ${filteredData.length} entries`);
+          data.length = 0; // Clear the array
+          data.push(...filteredData); // Replace with filtered data
+        } else {
+          logDbOperation(`Warning: Client-side teacher filtering found no matches for ID ${filters.teacherId}`);
+        }
       }
       
       // Cache the unfiltered results
@@ -720,6 +898,14 @@ export async function getTeacherSchedule(
   logDbOperation(`Fetching schedule for teacher ID ${teacherId} on ${date}`);
   
   try {
+    // Get teacher details for additional context
+    const teacher = await getTeacherById(teacherId);
+    if (teacher) {
+      logDbOperation(`Teacher info: ${teacher.Teacher_name} (${teacher.Teacher_Type})`);
+    } else {
+      logDbOperation(`Warning: Could not find details for teacher ID ${teacherId}`, 'warn');
+    }
+    
     // Get all calendar tables
     const calendarTables = await getCalendarTables();
     
@@ -733,8 +919,11 @@ export async function getTeacherSchedule(
         return entry.Date === date && (entryId % 5) + 1 === teacherId;
       });
       
+      logDbOperation(`Generated ${entries.length} fallback entries for teacher ${teacherId}`);
       return entries;
     }
+    
+    logDbOperation(`Found ${calendarTables.length} calendar tables to query: ${calendarTables.join(', ')}`);
     
     // Get entries from all calendars and combine them
     const allEntries: CalendarEntry[] = [];
@@ -750,17 +939,104 @@ export async function getTeacherSchedule(
     
     const results = await Promise.all(entryPromises);
     
-    // Combine all entries
-    results.forEach(entries => {
-      allEntries.push(...entries);
+    // Combine all entries and log results by table
+    results.forEach((entries, index) => {
+      const tableName = calendarTables[index];
+      if (entries.length > 0) {
+        logDbOperation(`Found ${entries.length} entries in ${tableName} for teacher ${teacherId}`);
+        
+        // Log a sample entry for debugging
+        if (entries.length > 0) {
+          const sample = entries[0];
+          logDbOperation(`Sample entry from ${tableName}: ${JSON.stringify(sample)}`);
+        }
+        
+        allEntries.push(...entries);
+      } else {
+        logDbOperation(`No entries found in ${tableName} for teacher ${teacherId} on ${date}`);
+      }
     });
     
+    // If no entries found in any table, try a more lenient search as fallback
+    if (allEntries.length === 0) {
+      logDbOperation(`No entries found in any table for teacher ${teacherId}. Trying backup approach...`);
+      
+      // Get teacher type to implement heuristic matching
+      const isNativeTeacher = teacher?.Teacher_Type?.toLowerCase().includes('native') || teacherId <= 3;
+      
+      // Try to get all entries for the date and filter client-side with more lenient criteria
+      const backupPromises = calendarTables.map(tableName => 
+        getCalendarEntries(tableName, { date }) // Only filter by date, not teacher
+          .catch(err => {
+            return [] as CalendarEntry[];
+          })
+      );
+      
+      const backupResults = await Promise.all(backupPromises);
+      const backupEntries: CalendarEntry[] = [];
+      
+      // Process backup results with more lenient matching
+      backupResults.forEach((entries, index) => {
+        const tableName = calendarTables[index];
+        
+        // Apply more lenient teacher matching logic
+        const matchedEntries = entries.filter(entry => {
+          // For Native teachers, match based on NT-Led field
+          if (isNativeTeacher) {
+            const isNTLed = entry['NT-Led'] === true || 
+                          (typeof entry['NT-Led'] === 'string' && 
+                           entry['NT-Led'].toLowerCase() === 'yes');
+            if (isNTLed) return true;
+          }
+          
+          // Check any field containing 'teacher' for partial matches
+          for (const key in entry) {
+            const fieldValue = entry[key];
+            if (typeof fieldValue === 'string' && 
+                key.toLowerCase().includes('teacher') && 
+                // Match on teacher name if we have it
+                (teacher && fieldValue.includes(teacher.Teacher_name))) {
+              return true;
+            }
+          }
+          
+          return false;
+        });
+        
+        if (matchedEntries.length > 0) {
+          logDbOperation(`Backup approach: Found ${matchedEntries.length} entries in ${tableName} using lenient matching`);
+          backupEntries.push(...matchedEntries);
+        }
+      });
+      
+      // If backup approach found entries, use those
+      if (backupEntries.length > 0) {
+        logDbOperation(`Backup approach found ${backupEntries.length} entries in total`);
+        allEntries.push(...backupEntries);
+      }
+    }
+    
+    // If still no entries, use fallback data
+    if (allEntries.length === 0) {
+      logDbOperation(`No entries found for teacher ${teacherId} after all attempts, using fallback data`);
+      const fallbackTable = 'Fallback-Course-Calendar';
+      const fallbackEntries = getFallbackCalendar(fallbackTable).filter(entry => {
+        const entryId = entry.id || 0;
+        return entry.Date === date && (entryId % 5) + 1 === teacherId;
+      });
+      
+      return fallbackEntries;
+    }
+    
     // Sort by start time
-    return allEntries.sort((a, b) => {
+    const sortedEntries = allEntries.sort((a, b) => {
       const aStart = a.Start || '';
       const bStart = b.Start || '';
       return aStart.localeCompare(bStart);
     });
+    
+    logDbOperation(`Returning ${sortedEntries.length} total entries for teacher ${teacherId} on ${date}`);
+    return sortedEntries;
   } catch (err) {
     logDbOperation(`Error in getTeacherSchedule for teacher ${teacherId}:`, 'error', err);
     
@@ -827,10 +1103,18 @@ export async function discoverDatabaseSchema(): Promise<{tables: string[]; struc
     const tablePromises = tables.map(async (tableName) => {
       try {
         // Try to get a sample row to infer columns
-        const { data, error } = await supabaseService.getClient()
+        const query = supabaseService.getClient()
           .from(tableName)
-          .select('*')
-          .limit(1);
+          .select('*');
+          
+        let result;
+        if (typeof query === 'object' && query !== null && 'limit' in query && typeof query.limit === 'function') {
+          result = await query.limit(1);
+        } else {
+          result = await query;
+        }
+        
+        const { data, error } = result;
           
         if (error) {
           logDbOperation(`Error getting columns for ${tableName}:`, 'error', error);

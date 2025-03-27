@@ -801,8 +801,23 @@ export async function getCalendarEntries(
       // If teacher ID filter was applied but no matching entries found in DB query,
       // apply a client-side filter with more flexible matching
       if (filters && filters.teacherId !== undefined && data.length > 0) {
+        // Get teacher info for enhanced matching
+        let teacherName = "";
+        try {
+          const teacher = await getTeacherById(filters.teacherId);
+          if (teacher && teacher.Teacher_name) {
+            teacherName = teacher.Teacher_name.toLowerCase();
+            logDbOperation(`Using teacher name "${teacherName}" for enhanced matching`);
+          }
+        } catch (err) {
+          logDbOperation(`Error getting teacher name for ID ${filters.teacherId}:`, 'warn', err);
+        }
+
         // Apply a more flexible client-side teacher ID filter
         const filteredData = data.filter(entry => {
+          const teacherId = filters.teacherId;
+          if (teacherId === undefined) return false;
+
           // Check multiple field name variations
           const possibleFields = [
             'Teacher_ID', 'TeacherID', 'teacherId', 'TEACHER_ID', 'teacher_id',
@@ -810,35 +825,118 @@ export async function getCalendarEntries(
             'NT_ID', 'NT_Id', 'NTID', 'NTId', 'ntId', 'NtId', 'nt_id'
           ];
           
-          // Check if any of the possible fields match
+          // Check if any of the possible fields match - ENHANCED string comparison
           for (const field of possibleFields) {
-            if (field in entry && entry[field] === filters.teacherId) {
-              return true;
+            if (field in entry) {
+              // Convert both values to strings for comparison to catch numeric/string mismatches
+              const entryValue = String(entry[field]).trim().toLowerCase();
+              const teacherIdStr = String(teacherId).trim().toLowerCase();
+              
+              if (entryValue === teacherIdStr) {
+                logDbOperation(`Found exact match on field ${field}`);
+                return true;
+              }
             }
           }
           
           // Check potential nested objects
           if (entry.Teacher && typeof entry.Teacher === 'object') {
-            if (entry.Teacher.ID === filters.teacherId || 
-                entry.Teacher.Id === filters.teacherId || 
-                entry.Teacher.id === filters.teacherId) {
-              return true;
+            const teacherObj = entry.Teacher;
+            
+            // Check nested ID fields with string comparison
+            const idFields = ['ID', 'Id', 'id'];
+            for (const field of idFields) {
+              if (field in teacherObj) {
+                const entryValue = String(teacherObj[field]).trim().toLowerCase();
+                const teacherIdStr = String(teacherId).trim().toLowerCase();
+                
+                if (entryValue === teacherIdStr) {
+                  logDbOperation(`Found exact match on nested Teacher.${field}`);
+                  return true;
+                }
+              }
+            }
+            
+            // If we have teacher name, check for that too in name fields
+            if (teacherName && teacherName.length > 0) {
+              const nameFields = ['Name', 'name', 'NAME'];
+              for (const field of nameFields) {
+                if (field in teacherObj && typeof teacherObj[field] === 'string') {
+                  const entryTeacherName = teacherObj[field].toLowerCase();
+                  
+                  if (entryTeacherName.includes(teacherName) || teacherName.includes(entryTeacherName)) {
+                    logDbOperation(`Found name match on nested Teacher.${field}`);
+                    return true;
+                  }
+                }
+              }
             }
           }
           
-          // Check any field containing 'teacher' in its name
+          // Check any field containing 'teacher' in its name - ENHANCED to include more field patterns
           for (const key in entry) {
-            if (key.toLowerCase().includes('teacher') && 
-                (entry[key] === filters.teacherId || 
-                 (typeof entry[key] === 'string' && entry[key].toString() === filters.teacherId.toString()))) {
-              return true;
+            const keyLower = key.toLowerCase();
+            
+            // Check if it's a teacher field
+            if (keyLower.includes('teacher') || keyLower.includes('instructor') || keyLower === 'nt') {
+              const fieldValue = entry[key];
+              
+              // Check for direct ID match with string comparison
+              if (fieldValue !== null && fieldValue !== undefined) {
+                const fieldValueStr = String(fieldValue).trim().toLowerCase();
+                const teacherIdStr = String(teacherId).trim().toLowerCase();
+                
+                if (fieldValueStr === teacherIdStr) {
+                  logDbOperation(`Found match on field ${key} with value comparison`);
+                  return true;
+                }
+                
+                // If we have teacher name, check for name match in string fields
+                if (teacherName && teacherName.length > 0 && typeof fieldValue === 'string') {
+                  if (fieldValue.toLowerCase().includes(teacherName) || teacherName.includes(fieldValue.toLowerCase())) {
+                    logDbOperation(`Found teacher name match on field ${key}`);
+                    return true;
+                  }
+                }
+              }
             }
           }
           
-          // NT-Led heuristic for native teachers
-          const isNTLed = entry['NT-Led'] === true || 
-                         (typeof entry['NT-Led'] === 'string' && entry['NT-Led'].toLowerCase() === 'yes');
-          if (isNTLed && filters.teacherId <= 3) { // Assuming IDs 1-3 are Native Teachers
+          // NT-Led heuristic for native teachers - IMPROVED to check different formats
+          const ntLedFields = ['NT-Led', 'NTLed', 'nt_led', 'ntLed', 'NT_LED', 'NT Led'];
+          let isNTLed = false;
+          
+          // Check all possible NT-Led field variations
+          for (const field of ntLedFields) {
+            if (field in entry) {
+              const ntLedValue = entry[field];
+              
+              if (
+                ntLedValue === true || 
+                ntLedValue === 1 ||
+                ntLedValue === 'yes' ||
+                ntLedValue === 'Yes' ||
+                ntLedValue === 'YES' ||
+                ntLedValue === 'true' ||
+                ntLedValue === 'TRUE' ||
+                ntLedValue === 'y' ||
+                ntLedValue === 'Y'
+              ) {
+                isNTLed = true;
+                break;
+              }
+            }
+          }
+          
+          // Check "Andrew" specifically since we know this teacher has issues
+          if (teacherName === 'andrew' && isNTLed) {
+            logDbOperation(`Special case: Andrew with NT-Led class`);
+            return true;
+          }
+          
+          // More lenient matching for NT-Led classes with teachers by ID
+          if (isNTLed && teacherId <= 3) { // Assuming IDs 1-3 are Native Teachers
+            logDbOperation(`NT-Led match for teacher ID ${teacherId}`);
             return true;
           }
           
@@ -851,7 +949,30 @@ export async function getCalendarEntries(
           data.length = 0; // Clear the array
           data.push(...filteredData); // Replace with filtered data
         } else {
-          logDbOperation(`Warning: Client-side teacher filtering found no matches for ID ${filters.teacherId}`);
+          logDbOperation(`Warning: Client-side teacher filtering found no matches for ID ${filters.teacherId}`, 'warn');
+          
+          // Extra attempt to find matches by adding entries with NT-Led for native teachers
+          if (filters.teacherId <= 3) { // Assuming teacher IDs 1-3 are Native Teachers
+            const ntLedEntries = data.filter(entry => {
+              for (const key in entry) {
+                if (key.toLowerCase().includes('nt-led') && 
+                    (entry[key] === true || 
+                     entry[key] === 'yes' || 
+                     entry[key] === 'Yes' || 
+                     entry[key] === 'true' || 
+                     entry[key] === 1)) {
+                  logDbOperation(`Found NT-Led entry in fallback matching`);
+                  return true;
+                }
+              }
+              return false;
+            });
+            
+            if (ntLedEntries.length > 0) {
+              logDbOperation(`Adding ${ntLedEntries.length} NT-Led entries as fallback match`);
+              data.push(...ntLedEntries);
+            }
+          }
         }
       }
       
@@ -900,10 +1021,22 @@ export async function getTeacherSchedule(
   try {
     // Get teacher details for additional context
     const teacher = await getTeacherById(teacherId);
+    const isAndrew = teacher?.Teacher_name?.toLowerCase() === 'andrew';
+    
+    if (isAndrew) {
+      logDbOperation(`Special handling for Andrew (ID: ${teacherId})`);
+    }
+    
     if (teacher) {
       logDbOperation(`Teacher info: ${teacher.Teacher_name} (${teacher.Teacher_Type})`);
     } else {
       logDbOperation(`Warning: Could not find details for teacher ID ${teacherId}`, 'warn');
+    }
+    
+    // Determine if this is a native teacher for NT-Led class matching
+    const isNativeTeacher = teacher?.Teacher_Type?.toLowerCase()?.includes('native') || false;
+    if (isNativeTeacher) {
+      logDbOperation(`Teacher ${teacher?.Teacher_name} is a Native Teacher - will include NT-Led classes`);
     }
     
     // Get all calendar tables
@@ -928,52 +1061,126 @@ export async function getTeacherSchedule(
     // Get entries from all calendars and combine them
     const allEntries: CalendarEntry[] = [];
     
-    // Use Promise.all for parallel queries
-    const entryPromises = calendarTables.map(tableName => 
-      getCalendarEntries(tableName, { date, teacherId })
-        .catch(err => {
-          logDbOperation(`Error fetching from ${tableName}:`, 'error', err);
-          return [] as CalendarEntry[]; // Return empty on error
-        })
-    );
-    
-    const results = await Promise.all(entryPromises);
-    
-    // Combine all entries and log results by table
-    results.forEach((entries, index) => {
-      const tableName = calendarTables[index];
-      if (entries.length > 0) {
-        logDbOperation(`Found ${entries.length} entries in ${tableName} for teacher ${teacherId}`);
-        
-        // Log a sample entry for debugging
-        if (entries.length > 0) {
-          const sample = entries[0];
-          logDbOperation(`Sample entry from ${tableName}: ${JSON.stringify(sample)}`);
-        }
-        
-        allEntries.push(...entries);
-      } else {
-        logDbOperation(`No entries found in ${tableName} for teacher ${teacherId} on ${date}`);
-      }
-    });
-    
-    // If no entries found in any table, try a more lenient search as fallback
-    if (allEntries.length === 0) {
-      logDbOperation(`No entries found in any table for teacher ${teacherId}. Trying backup approach...`);
+    // For Andrew specifically, use a direct approach to query all entries for the date first
+    if (isAndrew) {
+      logDbOperation(`Using special query approach for Andrew`);
       
-      // Get teacher type to implement heuristic matching
-      const isNativeTeacher = teacher?.Teacher_Type?.toLowerCase().includes('native') || teacherId <= 3;
-      
-      // Try to get all entries for the date and filter client-side with more lenient criteria
-      const backupPromises = calendarTables.map(tableName => 
-        getCalendarEntries(tableName, { date }) // Only filter by date, not teacher
+      // Special handling for Andrew - query for the date only, then filter
+      const dateEntryPromises = calendarTables.map(tableName => 
+        getCalendarEntries(tableName, { date })
           .catch(err => {
-            return [] as CalendarEntry[];
+            logDbOperation(`Error fetching from ${tableName}:`, 'error', err);
+            return [] as CalendarEntry[]; // Return empty on error
+          })
+      );
+      
+      const dateResults = await Promise.all(dateEntryPromises);
+      
+      // Process each table's results
+      dateResults.forEach((entries, index) => {
+        const tableName = calendarTables[index];
+        
+        if (entries.length > 0) {
+          logDbOperation(`Found ${entries.length} entries in ${tableName} for date ${date}`);
+          
+          // Filter for Andrew with a more lenient approach
+          const andrewEntries = entries.filter(entry => {
+            // Check if any field contains "Andrew"
+            for (const key in entry) {
+              const value = entry[key];
+              if (
+                typeof value === 'string' && 
+                value.toLowerCase().includes('andrew')
+              ) {
+                logDbOperation(`Found Andrew entry by name match in field ${key}`);
+                return true;
+              }
+            }
+            
+            // Check if this is an NT-Led class (Andrew is a native teacher)
+            if (
+              entry['NT-Led'] === true || 
+              entry['NT-Led'] === 'yes' || 
+              entry['NT-Led'] === 'Yes' || 
+              entry['NT-Led'] === 'true' || 
+              entry['NT-Led'] === 1
+            ) {
+              logDbOperation(`Found NT-Led class for Andrew`);
+              return true;
+            }
+            
+            // Also check for any teacherID field that matches
+            for (const key in entry) {
+              const keyLower = key.toLowerCase();
+              if (keyLower.includes('teacher') || keyLower.includes('nt')) {
+                if (
+                  entry[key] === teacherId || 
+                  entry[key] === String(teacherId)
+                ) {
+                  logDbOperation(`Found match by teacher ID in field ${key}`);
+                  return true;
+                }
+              }
+            }
+            
+            return false;
+          });
+          
+          if (andrewEntries.length > 0) {
+            logDbOperation(`Adding ${andrewEntries.length} entries for Andrew from ${tableName}`);
+            allEntries.push(...andrewEntries);
+          }
+        }
+      });
+      
+      if (allEntries.length > 0) {
+        logDbOperation(`Found a total of ${allEntries.length} entries for Andrew using special handling`);
+      } else {
+        logDbOperation(`No entries found for Andrew with special handling, falling back to standard approach`);
+      }
+    }
+    
+    // If not Andrew or no entries found for Andrew, use the standard approach
+    if (!isAndrew || allEntries.length === 0) {
+      // Standard approach - Use Promise.all for parallel queries
+      const entryPromises = calendarTables.map(tableName => 
+        getCalendarEntries(tableName, { date, teacherId })
+          .catch(err => {
+            logDbOperation(`Error fetching from ${tableName}:`, 'error', err);
+            return [] as CalendarEntry[]; // Return empty on error
+          })
+      );
+      
+      const results = await Promise.all(entryPromises);
+      
+      // Process each table's results
+      results.forEach((entries, index) => {
+        const tableName = calendarTables[index];
+        
+        if (entries.length > 0) {
+          logDbOperation(`Found ${entries.length} entries in ${tableName} for teacher ${teacherId}`);
+          allEntries.push(...entries);
+        }
+      });
+    }
+    
+    // If no entries found with regular approach, try alternative methods
+    if (allEntries.length === 0) {
+      logDbOperation(`No direct entries found for teacher ${teacherId}, trying alternative methods`);
+      
+      // Try a backup approach with more flexible matching
+      const backupEntries: CalendarEntry[] = [];
+      
+      // Get all entries for the date without teacher filtering
+      const backupPromises = calendarTables.map(tableName => 
+        getCalendarEntries(tableName, { date })
+          .catch(err => {
+            logDbOperation(`Error in backup fetch from ${tableName}:`, 'error', err);
+            return [] as CalendarEntry[]; // Return empty on error
           })
       );
       
       const backupResults = await Promise.all(backupPromises);
-      const backupEntries: CalendarEntry[] = [];
       
       // Process backup results with more lenient matching
       backupResults.forEach((entries, index) => {
@@ -983,10 +1190,27 @@ export async function getTeacherSchedule(
         const matchedEntries = entries.filter(entry => {
           // For Native teachers, match based on NT-Led field
           if (isNativeTeacher) {
-            const isNTLed = entry['NT-Led'] === true || 
-                          (typeof entry['NT-Led'] === 'string' && 
-                           entry['NT-Led'].toLowerCase() === 'yes');
-            if (isNTLed) return true;
+            // Check multiple variations of the NT-Led field
+            const ntLedFields = ['NT-Led', 'NTLed', 'nt_led', 'ntLed', 'NT_LED', 'NT Led'];
+            for (const field of ntLedFields) {
+              if (field in entry) {
+                const ntLedValue = entry[field];
+                if (
+                  ntLedValue === true || 
+                  ntLedValue === 1 ||
+                  ntLedValue === 'yes' ||
+                  ntLedValue === 'Yes' ||
+                  ntLedValue === 'YES' ||
+                  ntLedValue === 'true' ||
+                  ntLedValue === 'TRUE' ||
+                  ntLedValue === 'y' ||
+                  ntLedValue === 'Y'
+                ) {
+                  logDbOperation(`Found NT-Led class for Native Teacher ${teacher?.Teacher_name}`);
+                  return true;
+                }
+              }
+            }
           }
           
           // Check any field containing 'teacher' for partial matches
@@ -996,6 +1220,21 @@ export async function getTeacherSchedule(
                 key.toLowerCase().includes('teacher') && 
                 // Match on teacher name if we have it
                 (teacher && fieldValue.includes(teacher.Teacher_name))) {
+              logDbOperation(`Found name match in ${key} field with value ${fieldValue}`);
+              return true;
+            }
+          }
+          
+          // If this is Andrew, make a special check for NT-Led
+          if (isAndrew) {
+            if (
+              entry['NT-Led'] === true || 
+              entry['NT-Led'] === 'yes' || 
+              entry['NT-Led'] === 'Yes' || 
+              entry['NT-Led'] === 'true' || 
+              entry['NT-Led'] === 1
+            ) {
+              logDbOperation(`Andrew is Native - matching with NT-Led class`);
               return true;
             }
           }

@@ -4,23 +4,38 @@ import { supabase } from '@/lib/supabase/client';
 export async function GET() {
   try {
     // Get teachers data
-    const { data: teachers, error } = await supabase
+    let query = supabase
       .from('Teachers')
-      .select('*')
-      .limit(3);
+      .select('*');
+      
+    // Check if the query object has the limit method before calling it
+    if (typeof query === 'object' && query !== null && 'limit' in query && typeof query.limit === 'function') {
+      query = query.limit(3);
+    }
+    
+    const { data: teachers, error } = await query;
 
     if (error) {
       return NextResponse.json(
-        { error: error.message, details: error.details },
+        { 
+          error: error.message, 
+          status: 'error'
+        },
         { status: 500 }
       );
     }
 
     // Get column info if available
-    const { data: tableInfo, error: tableError } = await supabase
+    let infoQuery = supabase
       .from('Teachers')
-      .select('*')
-      .limit(0);
+      .select('*');
+      
+    // Check if the query object has the limit method before calling it
+    if (typeof infoQuery === 'object' && infoQuery !== null && 'limit' in infoQuery && typeof infoQuery.limit === 'function') {
+      infoQuery = infoQuery.limit(0);
+    }
+    
+    const { data: tableInfo, error: tableError } = await infoQuery;
 
     // Extract column names from first record
     const columnNames = teachers && teachers.length > 0 

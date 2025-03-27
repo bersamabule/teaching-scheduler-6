@@ -13,19 +13,40 @@ export default function InspectTables() {
       try {
         setLoading(true);
         // First, get a sample row to examine structure
-        const { data, error } = await supabase
+        let query = supabase
           .from('Teachers')
-          .select('*')
-          .limit(1);
+          .select('*');
+        
+        // Check if the query object has the limit method before calling it
+        if (typeof query === 'object' && query !== null && 'limit' in query && typeof query.limit === 'function') {
+          query = query.limit(1);
+        }
+        
+        const { data, error } = await query;
 
         if (error) {
           throw error;
         }
 
         // Now, get the column definitions
-        const { data: columns, error: columnsError } = await supabase
-          .rpc('get_column_info', { table_name: 'Teachers' })
-          .select('*');
+        let columns = null;
+        let columnsError = null;
+
+        try {
+          if (typeof supabase === 'object' && supabase !== null && 'rpc' in supabase && typeof supabase.rpc === 'function') {
+            const result = await supabase
+              .rpc('get_column_info', { table_name: 'Teachers' })
+              .select('*');
+            
+            columns = result.data;
+            columnsError = result.error;
+          } else {
+            console.warn('RPC method not available on Supabase client');
+          }
+        } catch (rpcError: any) {
+          console.warn('Could not get column definitions:', rpcError);
+          columnsError = rpcError;
+        }
 
         if (columnsError) {
           console.warn('Could not get column definitions:', columnsError);

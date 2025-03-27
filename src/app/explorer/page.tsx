@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+import { FixedSizeList } from 'react-window';
 import { getTables, getTableData, clearCache } from '@/lib/supabase/data';
 import { supabaseService, ConnectionStatus } from '@/lib/supabase/service';
 import ConnectionStatusIndicator from '@/components/ConnectionStatusIndicator';
@@ -18,6 +19,45 @@ interface ColumnInfo {
   default?: string;
   inferred?: boolean;
 }
+
+// Component to render a single row for react-window using divs
+const Row = React.memo(({ index, style, data }: { index: number; style: React.CSSProperties; data: { columns: string[]; rows: any[] } }) => {
+  const { columns, rows } = data;
+  const row = rows[index];
+  const isEven = index % 2 === 0;
+
+  console.log(`Rendering Row ${index}`);
+
+  return (
+    // Apply the style from react-window to this outer div
+    <div
+      style={style} 
+      className={`${isEven ? 'bg-white' : 'bg-gray-50'} flex border-b border-gray-200`} // Use flex for horizontal layout, add bottom border
+    >
+      {columns.map((column, colIndex) => (
+        // Render cells as divs
+        <div 
+          key={colIndex} 
+          className="p-4 text-sm border-r border-gray-200 min-w-[350px] max-w-[500px] flex-shrink-0" // Use right border for separation
+          style={{ width: '350px' }} // Set a fixed width matching header
+        >
+          <div className="max-h-[60px] overflow-y-auto break-words whitespace-normal"> {/* Adjusted max-h */}
+            {row[column] === null 
+              ? <span className="text-gray-400 italic">null</span>
+              : typeof row[column] === 'boolean'
+                ? row[column] ? 'true' : 'false'
+                : typeof row[column] === 'object'
+                  ? JSON.stringify(row[column], null, 2)
+                  : String(row[column])
+            }
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+});
+
+Row.displayName = 'Row';
 
 export default function ExplorerPage() {
   const [tables, setTables] = useState<string[]>([]);
@@ -222,7 +262,7 @@ export default function ExplorerPage() {
     console.error("Table Data Error:", error);
   };
 
-  // Render table data
+  // Render table data using react-window
   const renderTableData = () => {
     if (loading) {
       return (
@@ -241,6 +281,10 @@ export default function ExplorerPage() {
       );
     }
 
+    const columns = Object.keys(tableData[0] || {});
+    const rowHeight = 80; // Estimated height per row (adjust as needed based on max cell height + padding)
+    const tableHeight = 600; // Max height for the virtualized list container
+
     return (
       <div className="p-4">
         <p className="text-sm text-gray-500 mb-4">
@@ -248,47 +292,30 @@ export default function ExplorerPage() {
           {error && <span className="text-orange-500 ml-2">{error}</span>}
         </p>
         
-        <div className="overflow-x-auto w-full">
-          <table className="table-auto border-collapse w-full">
-            <thead>
-              <tr className="bg-gray-50">
-                {Object.keys(tableData[0] || {}).map(column => (
-                  <th 
-                    key={column} 
-                    className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border border-gray-200 min-w-[350px] whitespace-normal"
-                  >
-                    {column}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableData.map((row, rowIndex) => (
-                <tr 
-                  key={rowIndex} 
-                  className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
-                >
-                  {Object.values(row).map((value, valueIndex) => (
-                    <td 
-                      key={valueIndex} 
-                      className="p-4 text-sm border border-gray-200 min-w-[350px] max-w-[500px]"
-                    >
-                      <div className="max-h-[250px] overflow-y-auto break-words whitespace-normal">
-                        {value === null 
-                          ? <span className="text-gray-400 italic">null</span>
-                          : typeof value === 'boolean'
-                            ? value ? 'true' : 'false'
-                            : typeof value === 'object'
-                              ? JSON.stringify(value, null, 2)
-                              : String(value)
-                        }
-                      </div>
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="overflow-x-auto w-full border border-gray-200"> {/* Added border */}
+          {/* Table Header */}
+          <div className="flex bg-gray-50 sticky top-0 z-10"> {/* Make header sticky */}
+             {columns.map(column => (
+               <div 
+                 key={column} 
+                 className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200 min-w-[350px] whitespace-normal flex-shrink-0"
+                 style={{ width: '350px' }} // Consistent width with cells
+               >
+                 {column}
+               </div>
+             ))}
+           </div>
+           
+           {/* Virtualized Table Body */}
+           <FixedSizeList
+            height={tableHeight} // Height of the scrollable area
+            itemCount={tableData.length} // Number of rows
+            itemSize={rowHeight} // Height of each row
+            width="100%" // Take full width
+            itemData={{ columns, rows: tableData }} // Pass data to Row component
+           >
+             {Row}
+           </FixedSizeList>
         </div>
       </div>
     );

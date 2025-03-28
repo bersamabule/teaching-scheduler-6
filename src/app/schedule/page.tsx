@@ -274,232 +274,110 @@ export default function SchedulePage() {
     loadCalendarData();
   };
 
-  return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-center mb-6">Teacher Schedule</h1>
-      
-      {/* Show synchronization indicator at the top of the page */}
-      <div className="mb-6">
-        <SynchronizationIndicator position="top" />
-      </div>
-      
-      {isOffline && (
-        <div className="mb-6">
-          <FallbackIndicator position="top" showDetails={true} />
-        </div>
-      )}
-      
-      <div className="mb-6">
-        <div className="bg-white rounded-lg shadow p-4 mb-4">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="col-span-1">
-              <h2 className="text-lg font-semibold mb-2">Select Teacher</h2>
-              <ErrorBoundary onError={handleTeacherSelectError}>
-                <TeacherSelect
-                  selectedTeacherId={selectedTeacherId}
-                  onTeacherSelect={handleTeacherSelect}
-                />
-              </ErrorBoundary>
-            </div>
-            
-            <div className="col-span-1 lg:col-span-2">
-              <h2 className="text-lg font-semibold mb-2">Select Date</h2>
-              <ErrorBoundary onError={handleDateSelectError}>
-                <DateSelect
-                  selectedDate={selectedDate}
-                  onDateSelect={handleDateSelect}
-                  onPreviousDay={handlePreviousDay}
-                  onNextDay={handleNextDay}
-                />
-              </ErrorBoundary>
-            </div>
-          </div>
-        </div>
-      </div>
+  const errorFallback = <ErrorFallbackComponent />; // Define a reusable fallback component instance
 
-      <div className="bg-white rounded-lg shadow p-4">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold">
-            {selectedTeacher ? `${selectedTeacher.name}'s Schedule` : 'Schedule'}
-            {selectedTeacher && <span className="text-sm font-normal ml-2 text-gray-500">({selectedTeacher.type} Teacher)</span>}
-          </h2>
-          <div className="flex items-center">
-            <span className="text-sm text-gray-500 mr-4">
-              Week of {weekDates.start} - {weekDates.end}
-            </span>
-            <button
-              onClick={toggleViewMode}
-              className="px-3 py-1 text-sm bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+  return (
+    <div className="flex flex-col h-full">
+      {isOffline && <FallbackIndicator />}
+      <SynchronizationIndicator />
+
+      {/* Header Controls - added print-hide class */}
+      <div className="bg-white shadow-sm p-4 rounded-lg mb-4 sticky top-0 z-10 print-hide">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          {/* Use fallback prop for ErrorBoundary */}
+          <ErrorBoundary fallback={errorFallback} onError={handleTeacherSelectError} key={`teacher-select-${selectedTeacherId}`}>
+            <TeacherSelect 
+              selectedTeacherId={selectedTeacherId}
+              onTeacherSelect={handleTeacherSelect}
+              calendarEntries={calendarEntries}
+            />
+          </ErrorBoundary>
+          
+          {/* Use fallback prop for ErrorBoundary */}
+          <ErrorBoundary fallback={errorFallback} onError={handleDateSelectError} key={`date-select-${selectedDate}`}>
+            <DateSelect 
+              selectedDate={selectedDate}
+              onDateSelect={handleDateSelect} 
+            />
+          </ErrorBoundary>
+
+          <div className="flex items-center justify-between md:justify-end space-x-2">
+            <button 
+              onClick={handlePreviousDay} 
+              className="px-3 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 print-hide"
               disabled={loading}
             >
-              {loading ? (
-                <LoadingIndicator type="dots" size="small" />
-              ) : (
-                viewMode === 'weekly' ? 'Table View' : 'Weekly View'
-              )}
+              &lt; Prev Week
             </button>
+            <button 
+              onClick={handleNextDay} 
+              className="px-3 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 print-hide"
+              disabled={loading}
+            >
+              Next Week &gt;
+            </button>
+            <button onClick={handleRefreshData} disabled={loading} className="p-2 bg-green-100 text-green-700 rounded disabled:opacity-50 print-hide">
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button onClick={() => window.print()} className="p-2 bg-blue-100 text-blue-700 rounded print-hide">
+              Print
+            </button>
+            <button onClick={() => setShowDebug(!showDebug)} className="p-2 bg-yellow-100 text-yellow-700 rounded print-hide">Debug</button>
           </div>
         </div>
-
-        <ErrorBoundary onError={handleCalendarError}>
-          {loading ? (
-            viewMode === 'weekly' ? (
-              <SkeletonLoader type="calendar" />
-            ) : (
-              <SkeletonLoader type="table" count={5} />
-            )
-          ) : error ? (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative" role="alert">
-              <strong className="font-bold">Error: </strong>
-              <span className="block sm:inline">{error}</span>
-            </div>
-          ) : (
-            <>
-              {viewMode === 'weekly' ? (
-                <WeeklyCalendar
-                  entries={calendarEntries}
-                  selectedDate={selectedDate}
-                  isLoading={loading}
-                  usingFallbackData={isOffline}
-                  onRefreshRequest={handleRefreshData}
-                />
-              ) : (
-                <LoadingOverlay isLoading={loading} text="Loading data...">
-                  {calendarEntries.length > 0 ? (
-                    <div className="bg-white shadow-sm rounded-lg border overflow-hidden">
-                      <h2 className="text-sm font-semibold p-2 border-b bg-gray-50">
-                        {selectedTeacher ? (
-                          <>Teacher: {selectedTeacher.Teacher_name}</>
-                        ) : (
-                          <>All Classes</>
-                        )}
-                      </h2>
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full border-collapse">
-                          <thead>
-                            <tr className="bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              <th className="border-b px-3 py-2">Date</th>
-                              <th className="border-b px-3 py-2">Day</th>
-                              <th className="border-b px-3 py-2">Course</th>
-                              <th className="border-b px-3 py-2">Level</th>
-                              <th className="border-b px-3 py-2">Time</th>
-                              <th className="border-b px-3 py-2">Day 1</th>
-                              <th className="border-b px-3 py-2">Day 2</th>
-                              <th className="border-b px-3 py-2">NT-Led</th>
-                              <th className="border-b px-3 py-2">Class ID</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200 bg-white">
-                            {calendarEntries
-                              .sort((a, b) => {
-                                // First sort by date
-                                const dateA = new Date(a.Date);
-                                const dateB = new Date(b.Date);
-                                const dateDiff = dateA.getTime() - dateB.getTime();
-                                
-                                if (dateDiff !== 0) return dateDiff;
-                                
-                                // Then by start time
-                                const timeA = a.Start || '00:00';
-                                const timeB = b.Start || '00:00';
-                                return timeA.localeCompare(timeB);
-                              })
-                              .map((entry) => {
-                                // Format date for display
-                                const entryDate = entry.Date ? 
-                                  (entry.Date.includes('T') ? 
-                                    parseISO(entry.Date) : 
-                                    parse(entry.Date, 'yyyy-MM-dd', new Date())
-                                  ) : 
-                                  new Date();
-                                
-                                const formattedDate = format(entryDate, 'MMM d, yyyy');
-                                const dayOfWeek = format(entryDate, 'EEE');
-                                const isSelectedDay = format(entryDate, 'yyyy-MM-dd') === selectedDate;
-                                const isToday = format(entryDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
-                                
-                                // Is this an NT-Led class?
-                                const isNTLed = entry['NT-Led'] === true || 
-                                  (typeof entry['NT-Led'] === 'string' && entry['NT-Led'].toLowerCase() === 'yes');
-                                
-                                return (
-                                  <tr 
-                                    key={`${entry.id}-${entry.Course}`} 
-                                    className={`
-                                      hover:bg-gray-50 text-sm
-                                      ${isSelectedDay ? 'bg-indigo-50' : ''}
-                                      ${isToday ? 'bg-blue-50' : ''}
-                                      ${isNTLed ? 'font-medium' : ''}
-                                    `}
-                                  >
-                                    <td className="px-3 py-2">{formattedDate}</td>
-                                    <td className="px-3 py-2">{dayOfWeek}</td>
-                                    <td className="px-3 py-2">{entry.Course}</td>
-                                    <td className="px-3 py-2">{entry.Level}</td>
-                                    <td className="px-3 py-2 font-mono text-xs">{entry.Start} - {entry.End}</td>
-                                    <td className="px-3 py-2">{entry.Day1}</td>
-                                    <td className="px-3 py-2">{entry.Day2}</td>
-                                    <td className="px-3 py-2">
-                                      <span className={`inline-block rounded-full w-2.5 h-2.5 ${
-                                        isNTLed ? 'bg-indigo-500' : 'bg-gray-300'
-                                      }`}></span>
-                                    </td>
-                                    <td className="px-3 py-2 font-mono text-xs">{entry['Class.ID']}</td>
-                                  </tr>
-                                );
-                              })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="bg-yellow-50 p-4 rounded-md border border-yellow-200">
-                      <p className="text-sm font-medium">No classes scheduled for the week of {
-                        parse(selectedDate, 'yyyy-MM-dd', new Date()).toLocaleDateString(undefined, {
-                          month: 'long',
-                          day: 'numeric',
-                          year: 'numeric'
-                        })
-                      } {selectedTeacher ? `with ${selectedTeacher.Teacher_name}` : ''}.</p>
-                    </div>
-                  )}
-                </LoadingOverlay>
-              )}
-            </>
-          )}
-        </ErrorBoundary>
-
-        {/* Debug Information (Collapsible) */}
-        {showDebug && (
-          <div className="mt-4 bg-gray-50 p-2 rounded-md text-xs border">
-            <div className="flex justify-between items-center mb-1">
-              <h3 className="font-semibold text-xs">Debug Information</h3>
-              <div className="flex items-center space-x-2">
-                {loading && <LoadingIndicator type="dots" size="small" />}
-                <button 
-                  onClick={() => setDebugInfo([])} 
-                  className="text-[10px] bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-0.5 rounded"
-                >
-                  Clear Logs
-                </button>
-              </div>
-            </div>
-            <div className="max-h-20 overflow-y-auto">
-              {debugInfo.length > 0 ? (
-                <ul className="list-disc pl-4">
-                  {debugInfo.map((log, index) => (
-                    <li key={index} className={`${log.includes('NT-Led') ? 'text-indigo-700 font-medium' : 'text-gray-700'}`}>
-                      {log}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-gray-500 italic">No logs yet</p>
-              )}
-            </div>
+        {selectedTeacher && (
+          <div className="mt-2 text-sm text-gray-600 font-medium print-show">
+            Filtering by: {selectedTeacher.Teacher_name} ({selectedTeacher.Teacher_Type || 'Unknown Type'})
           </div>
         )}
+        <div className="mt-1 text-sm text-gray-500 print-show">Displaying week: {weekDates.start} - {weekDates.end}</div>
       </div>
+
+      {/* Calendar View */}
+      <div className="flex-grow overflow-auto">
+        {loading && calendarEntries.length === 0 && (
+          <div className="p-4">
+            <SkeletonLoader type="calendar" />
+          </div>
+        )}
+        {error && <div className="p-4 text-red-500">Error: {error}</div>}
+        {!loading && !error && 
+          <ErrorBoundary fallback={errorFallback} onError={handleCalendarError} key={`calendar-${selectedDate}-${selectedTeacherId}`}>
+            <WeeklyCalendar 
+              entries={calendarEntries} 
+              currentDate={selectedDate}
+              selectedTeacher={selectedTeacher}
+              isLoading={loading}
+              usingFallbackData={isOffline}
+              onRefreshRequest={handleRefreshData}
+            />
+          </ErrorBoundary>
+        }
+      </div>
+
+      {/* Debug Info Panel - hide on print */}
+      {showDebug && (
+        <div className="fixed bottom-0 right-0 bg-gray-800 text-white p-4 w-full md:w-1/3 h-1/3 overflow-y-auto shadow-lg z-50 print-hide">
+          <h3 className="text-lg font-semibold mb-2">Debug Log</h3>
+          <button onClick={() => setDebugInfo([])} className="absolute top-2 right-2 text-xs bg-red-500 px-2 py-1 rounded">Clear</button>
+          <pre className="text-xs">
+            {debugInfo.map((log, index) => <div key={index}>{log}</div>)}
+          </pre>
+        </div>
+      )}
     </div>
   );
-} 
+}
+
+// Renamed ErrorFallback to avoid conflict, keep it simple
+function ErrorFallbackComponent() {
+  // Note: This simple version doesn't have access to resetErrorBoundary
+  // For a retry button, the ErrorBoundary component itself provides one, 
+  // or the fallback prop could be a function component receiving props.
+  return (
+    <div role="alert" className="p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+      <p className="font-bold">Component Error</p>
+      <p className="text-sm">This section could not be loaded. Please try refreshing.</p>
+    </div>
+  );
+}

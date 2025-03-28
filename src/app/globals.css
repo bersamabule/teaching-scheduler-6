@@ -55,3 +55,62 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Print-specific styles */
+@media print {
+  body {
+    /* Reset background and text for printing */
+    background-color: #fff !important;
+    color: #000 !important;
+    /* Remove default margins */
+    margin: 0;
+    padding: 1cm; /* Add some padding for print */
+    font-size: 10pt; /* Adjust base font size for print */
+  }
+
+  /* Hide elements marked with .print-hide */
+  .print-hide {
+    display: none !important;
+  }
+
+  /* Ensure elements marked with .print-show are displayed (useful if hidden by default) */
+  /* .print-show { 
+    display: block !important; 
+  } */
+
+  /* Optionally force display for specific elements needed in print */
+  header,
+  nav,
+  footer,
+  aside,
+  [aria-hidden="true"] {
+    display: none !important;
+  }
+
+  /* Ensure main content takes full width */
+  main {
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  
+  /* Adjust calendar styles for print */
+  .weekly-calendar-container { /* Add this class to the main div in WeeklyCalendar if needed */
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+  }
+
+  .weekly-calendar-grid { /* Add this class to the grid div in WeeklyCalendar if needed */
+    grid-template-columns: repeat(7, minmax(0, 1fr)); /* Ensure 7 columns */
+    font-size: 9pt; /* Smaller font for calendar */
+  }
+  
+  .calendar-entry { /* Add this class to individual entry divs if needed */
+     border: 1px solid #eee !important; /* Add faint borders for clarity */
+     padding: 2px !important; /* Reduce padding */
+     overflow-wrap: break-word; /* Allow long text to wrap */
+  }
+}
+
+/* ... potentially other global styles ... */

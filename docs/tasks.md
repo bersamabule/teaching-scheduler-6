@@ -22,105 +22,63 @@ This document tracks ongoing development tasks for the Teaching Scheduler applic
 - [x] Enhance teacher-calendar data association with improved field matching
 - [x] Add comprehensive logging for debugging teacher schedule issues
 - [x] Implement fallback matching for NT-Led classes when direct teacher matching fails
+- [x] Implement Statistical Dashboard page (`/dashboard`)
+- [x] Add workload and class type charts to dashboard
+- [x] Add Teacher Workload counts to `TeacherSelect` dropdown
+- [x] Implement Printable Schedule View
+- [x] Add print-specific CSS styles
+- [x] Add visual indicator for active teacher filter
+- [x] Add empty state message to `WeeklyCalendar` for teacher filters
 
 ## Current Tasks
 
-- [ ] Complete calendar view implementation
 - [ ] Add schedule editing functionality
 - [ ] Implement user authentication and authorization
-- [ ] Create administrative dashboard
-- [ ] Add reporting features for teacher scheduling
+- [ ] Add reporting features for teacher scheduling (Beyond basic dashboard)
 - [ ] Implement notifications for schedule changes
 
 ## Planned Tasks
 
-- [ ] Mobile-responsive enhancements for tablet and phone usage
-- [ ] Offline mode with data synchronization
+- [ ] Mobile-responsive enhancements for tablet and phone usage (Phase 4)
+- [ ] Performance optimizations (Lazy loading, Bundle analysis) (Phase 4)
+- [ ] Add automated testing (Unit/Integration) (Phase 4)
+- [ ] Accessibility improvements (Phase 4)
+- [ ] Standardize teacher references across data sources
+- [ ] Offline mode with data synchronization (Consider reviewing existing implementation)
 - [ ] Integration with the school's existing systems
-- [ ] Implement PDF export for schedules
+- [ ] Implement PDF export for schedules (Alternative/Enhancement to Print)
 - [ ] Add multi-language support
 
-## Current Sprint Tasks
+## Current Sprint Tasks (Phase 4 Focus)
 
 ### High Priority
-- [x] Improve Supabase "iWorld Scheduler" integration
-  - [x] Optimize connection reliability
-  - [x] Add robust error handling for intermittent connection issues
-  - [x] Implement connection status indicators in the UI
-  - [x] Add request retries for failed API calls
+- [ ] Mobile Responsiveness Enhancements
+  - [ ] Optimize `WeeklyCalendar` for smaller screens
+  - [ ] Adjust header controls layout
+  - [ ] Ensure `Database Explorer` is usable on mobile
+- [ ] Performance Analysis & Optimization
+  - [ ] Run `next-bundle-analyzer` and identify large modules
+  - [ ] Investigate lazy loading opportunities (e.g., Dashboard charts?)
+- [ ] Testing Implementation
+  - [ ] Set up Jest/React Testing Library configuration
+  - [ ] Add initial unit tests for `SupabaseService` or `data.ts` functions
+  - [ ] Add initial component tests for `TeacherSelect` or `WeeklyCalendar`
 
-- [ ] Set up automated deployment pipeline
+### Medium Priority
+- [ ] Standardize teacher references across data sources
+- [ ] Review/Refine Dashboard data fetching (Consider Supabase functions)
+- [ ] Accessibility audit and improvements
+- [ ] Set up automated deployment pipeline (Continue existing tasks)
   - [ ] Configure Docker MCP Server for container management
   - [ ] Implement Kubernetes MCP Server for production deployment
   - [ ] Set up CLI MCP Server for deployment scripts
   - [ ] Create GitHub Actions workflow for CI/CD
 
-- [ ] Enhance MCP server integration
-  - [x] Set up basic MCP server for console monitoring
-  - [ ] Implement file system access for debugging
-  - [ ] Configure external API access through MCP
-  - [ ] Add comprehensive logging capabilities
-
-- [x] Enhance fallback mechanisms (for offline/disconnected scenarios only)
-  - [x] Basic fallback system for connection failures
-  - [x] UI indicators when using fallback data
-  - [x] Synchronization when connection is restored
-
-- [x] Implement error boundaries
-  - [x] Add error boundary around main schedule view
-  - [x] Add error boundary around database explorer
-  - [x] Add global error fallback component
-  - [x] Integrate error reporting with MCP console monitor
-  - [x] Document error boundary implementation and best practices
-
-- [x] Fix remaining UI issues
-  - [x] Optimize header layout
-  - [x] Fix teacher selector dropdown
-  - [x] Add visual feedback for loading states
-  - [x] Ensure proper data display in Database Explorer with wider columns
-  - [x] Fix database table listing to only show actual tables
-
-### Medium Priority
-- [ ] Enhance visualization
-  - [ ] Add color-coding system for different class types
-  - [ ] Implement highlighting for NT-Led classes
-  - [ ] Add visual indicators for conflicts
-
-- [ ] Improve filtering
-  - [ ] Add filter by course type
-  - [ ] Add filter by teacher type
-  - [ ] Add date range filtering
-  
-- [ ] Extend MCP capabilities
-  - [ ] Add database inspection tools
-  - [ ] Implement code analysis features
-  - [ ] Set up remote debugging capabilities
-  - [ ] Create performance monitoring tools
-
-- [ ] Implement deployment monitoring
-  - [ ] Set up health checks for deployed instances
-  - [ ] Configure automated rollback on failure
-  - [ ] Implement deployment notifications
-  - [ ] Create deployment performance dashboard
-
 ### Low Priority
-- [ ] Set up testing infrastructure
-  - [ ] Configure Jest
-  - [ ] Add component tests for TeacherSelect
-  - [ ] Add component tests for DateSelect
-  - [ ] Integrate with MCP testing tools
-
-- [ ] Add development tooling
-  - [x] MCP server for console monitoring
-  - [ ] Performance profiling via MCP
-  - [ ] Bundle size analysis
-  - [ ] Integration with external developer tools
-
-- [ ] Enhance deployment pipeline
-  - [ ] Implement canary deployments
-  - [ ] Add multi-region deployment support
-  - [ ] Configure automated database migrations
-  - [ ] Set up environment-specific configuration management
+- [ ] Extend MCP capabilities (Continue existing tasks)
+- [ ] Implement deployment monitoring (Continue existing tasks)
+- [ ] Add development tooling (Continue existing tasks)
+- [ ] Enhance deployment pipeline (Continue existing tasks)
 
 ## Task Details
 

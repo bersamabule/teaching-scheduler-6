@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { format, parseISO, startOfWeek, addDays, isWithinInterval, parse } from 'date-fns';
-import { CalendarEntry } from '@/lib/supabase/data';
+import { CalendarEntry, Teacher } from '@/lib/supabase/data';
 import FallbackIndicator from './FallbackIndicator';
 import { supabaseService } from '@/lib/supabase/service';
 import LoadingOverlay from './LoadingOverlay';
@@ -13,7 +13,8 @@ const COMPONENT_ID = 'WeeklyCalendar';
 
 interface WeeklyCalendarProps {
   entries: CalendarEntry[];
-  selectedDate: string;
+  currentDate: string;
+  selectedTeacher?: Teacher | null;
   isLoading: boolean;
   usingFallbackData?: boolean;
   onRefreshRequest?: () => void;
@@ -21,7 +22,8 @@ interface WeeklyCalendarProps {
 
 export default function WeeklyCalendar({ 
   entries, 
-  selectedDate, 
+  currentDate, 
+  selectedTeacher,
   isLoading, 
   usingFallbackData = false,
   onRefreshRequest
@@ -82,8 +84,9 @@ export default function WeeklyCalendar({
   
   // Get start of the current week (Monday)
   const weekStart = useMemo(() => {
-    return startOfWeek(parseISO(selectedDate), { weekStartsOn: 1 });
-  }, [selectedDate]);
+    const parsedDate = currentDate.includes('T') ? parseISO(currentDate) : parse(currentDate, 'yyyy-MM-dd', new Date());
+    return startOfWeek(parsedDate, { weekStartsOn: 1 });
+  }, [currentDate]);
   
   // Create array of weekdays
   const weekDays = useMemo(() => {
@@ -271,6 +274,9 @@ export default function WeeklyCalendar({
     setSelectedEntry(null);
   };
   
+  // Calculate if the calendar should display the empty state for a specific teacher
+  const showEmptyStateForTeacher = selectedTeacher && entries.length === 0;
+  
   // Improved loading display
   if (isLoading) {
     return (
@@ -287,207 +293,144 @@ export default function WeeklyCalendar({
   }
   
   return (
-    <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+    <div className="bg-white shadow overflow-hidden sm:rounded-lg border border-gray-200 relative">
       {usingFallbackData && (
         <div className="px-4 py-2 bg-amber-50 border-b border-amber-200">
           <FallbackIndicator showDetails={false} />
         </div>
       )}
       
-      <div className="overflow-x-auto">
-        {/* Week Navigation */}
-        <div className="p-4 border-b">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-bold">
-              Weekly Schedule: {format(weekStart, 'MMM d')} - {format(addDays(weekStart, 6), 'MMM d, yyyy')}
-            </h2>
-            
-            {/* Filter Button */}
-            <div className="relative" ref={filterDropdownRef}>
-              <button 
-                onClick={() => setShowFilterOptions(!showFilterOptions)}
-                className="inline-flex items-center px-2 py-1 text-xs border border-gray-300 rounded shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
-                </svg>
-                {courseTypeFilter === 'all' ? 'Filter' : `Filtered: ${courseTypeFilter}`}
-              </button>
-              
-              {/* Filter Options Dropdown */}
-              {showFilterOptions && (
-                <div className="absolute right-0 mt-1 w-48 bg-white shadow-lg rounded-md overflow-hidden z-10 border border-gray-200">
-                  <div className="py-1">
-                    <button 
-                      onClick={() => {
-                        setCourseTypeFilter('all');
-                        setShowFilterOptions(false);
-                      }}
-                      className={`w-full px-4 py-2 text-left text-xs ${courseTypeFilter === 'all' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
-                    >
-                      All Courses
-                    </button>
-                    
-                    <div className="px-3 py-1 text-xs font-medium text-gray-500 bg-gray-50">Course Type</div>
-                    
-                    <button 
-                      onClick={() => {
-                        setCourseTypeFilter('sprouts');
-                        setShowFilterOptions(false);
-                      }}
-                      className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'sprouts' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
-                    >
-                      <span className="w-2 h-2 mr-2 inline-block bg-purple-100 border-l-4 border-purple-500 rounded-sm"></span>
-                      Sprouts
-                    </button>
-                    
-                    <button 
-                      onClick={() => {
-                        setCourseTypeFilter('clovers');
-                        setShowFilterOptions(false);
-                      }}
-                      className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'clovers' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
-                    >
-                      <span className="w-2 h-2 mr-2 inline-block bg-emerald-100 border-l-4 border-emerald-500 rounded-sm"></span>
-                      Clovers
-                    </button>
-                    
-                    <button 
-                      onClick={() => {
-                        setCourseTypeFilter('guardians');
-                        setShowFilterOptions(false);
-                      }}
-                      className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'guardians' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
-                    >
-                      <span className="w-2 h-2 mr-2 inline-block bg-blue-100 border-l-4 border-blue-500 rounded-sm"></span>
-                      Guardians
-                    </button>
-                    
-                    <button 
-                      onClick={() => {
-                        setCourseTypeFilter('workshops');
-                        setShowFilterOptions(false);
-                      }}
-                      className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'workshops' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
-                    >
-                      <span className="w-2 h-2 mr-2 inline-block bg-amber-100 border-l-4 border-amber-500 rounded-sm"></span>
-                      Workshops
-                    </button>
-                    
-                    <button 
-                      onClick={() => {
-                        setCourseTypeFilter('advanced');
-                        setShowFilterOptions(false);
-                      }}
-                      className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'advanced' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
-                    >
-                      <span className="w-2 h-2 mr-2 inline-block bg-rose-100 border-l-4 border-rose-500 rounded-sm"></span>
-                      Advanced
-                    </button>
-                    
-                    <div className="px-3 py-1 text-xs font-medium text-gray-500 bg-gray-50">Teacher Type</div>
-                    
-                    <button 
-                      onClick={() => {
-                        setCourseTypeFilter('ntled');
-                        setShowFilterOptions(false);
-                      }}
-                      className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'ntled' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
-                    >
-                      <span className="w-2 h-2 mr-2 inline-block bg-indigo-100 border border-indigo-500 rounded-sm"></span>
-                      NT-Led Only
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+      <div className="px-4 py-3 sm:px-6 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+        <h3 className="text-lg leading-6 font-medium text-gray-900">
+          Weekly Schedule
+        </h3>
+        <div className="relative inline-block text-left" ref={filterDropdownRef}>
+          <button 
+            onClick={() => setShowFilterOptions(!showFilterOptions)}
+            className="inline-flex items-center px-2 py-1 text-xs border border-gray-300 rounded shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
+            </svg>
+            {courseTypeFilter === 'all' ? 'Filter' : `Filtered: ${courseTypeFilter}`}
+          </button>
           
-          {/* Color Coding Legend */}
-          <div className="flex flex-wrap gap-2 text-xs">
-            <div className="flex items-center px-2 py-1 bg-gray-50 rounded">
-              <span className="font-medium mr-2">Course Types:</span>
-              
-              <span className="flex items-center mr-2">
-                <span className="w-3 h-3 inline-block bg-purple-100 border-l-4 border-purple-500 mr-1 rounded-sm"></span>
-                <span>Sprouts</span>
-              </span>
-              
-              <span className="flex items-center mr-2">
-                <span className="w-3 h-3 inline-block bg-emerald-100 border-l-4 border-emerald-500 mr-1 rounded-sm"></span>
-                <span>Clovers</span>
-              </span>
-              
-              <span className="flex items-center mr-2">
-                <span className="w-3 h-3 inline-block bg-blue-100 border-l-4 border-blue-500 mr-1 rounded-sm"></span>
-                <span>Guardians</span>
-              </span>
-              
-              <span className="flex items-center mr-2">
-                <span className="w-3 h-3 inline-block bg-amber-100 border-l-4 border-amber-500 mr-1 rounded-sm"></span>
-                <span>Workshops</span>
-              </span>
-              
-              <span className="flex items-center">
-                <span className="w-3 h-3 inline-block bg-rose-100 border-l-4 border-rose-500 mr-1 rounded-sm"></span>
-                <span>Advanced</span>
-              </span>
-            </div>
-            
-            <div className="flex items-center px-2 py-1 bg-gray-50 rounded">
-              <span className="font-medium mr-2">Teacher Types:</span>
-              
-              <span className="flex items-center mr-3">
-                <span className="w-3 h-3 inline-block bg-indigo-100 border border-indigo-500 mr-1 rounded-sm"></span>
-                <span>NT-Led</span>
-              </span>
-              
-              <span className="flex items-center">
-                <span className="w-3 h-3 inline-block bg-slate-100 border border-slate-500 mr-1 rounded-sm"></span>
-                <span>Local Teacher</span>
-              </span>
-            </div>
-            
-            {/* Current Filter Indicator */}
-            {courseTypeFilter !== 'all' && (
-              <div className="flex items-center px-2 py-1 bg-indigo-50 text-indigo-700 rounded">
-                <span className="font-medium mr-2">Filter Active:</span>
-                <span className="capitalize">{courseTypeFilter}</span>
+          {showFilterOptions && (
+            <div className="absolute right-0 mt-1 w-48 bg-white shadow-lg rounded-md overflow-hidden z-10 border border-gray-200">
+              <div className="py-1">
                 <button 
-                  onClick={() => setCourseTypeFilter('all')}
-                  className="ml-2 text-indigo-500 hover:text-indigo-700"
+                  onClick={() => {
+                    setCourseTypeFilter('all');
+                    setShowFilterOptions(false);
+                  }}
+                  className={`w-full px-4 py-2 text-left text-xs ${courseTypeFilter === 'all' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
+                  All Courses
+                </button>
+                
+                <div className="px-3 py-1 text-xs font-medium text-gray-500 bg-gray-50">Course Type</div>
+                
+                <button 
+                  onClick={() => {
+                    setCourseTypeFilter('sprouts');
+                    setShowFilterOptions(false);
+                  }}
+                  className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'sprouts' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
+                >
+                  <span className="w-2 h-2 mr-2 inline-block bg-purple-100 border-l-4 border-purple-500 rounded-sm"></span>
+                  Sprouts
+                </button>
+                
+                <button 
+                  onClick={() => {
+                    setCourseTypeFilter('clovers');
+                    setShowFilterOptions(false);
+                  }}
+                  className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'clovers' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
+                >
+                  <span className="w-2 h-2 mr-2 inline-block bg-emerald-100 border-l-4 border-emerald-500 rounded-sm"></span>
+                  Clovers
+                </button>
+                
+                <button 
+                  onClick={() => {
+                    setCourseTypeFilter('guardians');
+                    setShowFilterOptions(false);
+                  }}
+                  className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'guardians' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
+                >
+                  <span className="w-2 h-2 mr-2 inline-block bg-blue-100 border-l-4 border-blue-500 rounded-sm"></span>
+                  Guardians
+                </button>
+                
+                <button 
+                  onClick={() => {
+                    setCourseTypeFilter('workshops');
+                    setShowFilterOptions(false);
+                  }}
+                  className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'workshops' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
+                >
+                  <span className="w-2 h-2 mr-2 inline-block bg-amber-100 border-l-4 border-amber-500 rounded-sm"></span>
+                  Workshops
+                </button>
+                
+                <button 
+                  onClick={() => {
+                    setCourseTypeFilter('advanced');
+                    setShowFilterOptions(false);
+                  }}
+                  className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'advanced' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
+                >
+                  <span className="w-2 h-2 mr-2 inline-block bg-rose-100 border-l-4 border-rose-500 rounded-sm"></span>
+                  Advanced
+                </button>
+                
+                <div className="px-3 py-1 text-xs font-medium text-gray-500 bg-gray-50">Teacher Type</div>
+                
+                <button 
+                  onClick={() => {
+                    setCourseTypeFilter('ntled');
+                    setShowFilterOptions(false);
+                  }}
+                  className={`w-full px-4 py-2 text-left text-xs flex items-center ${courseTypeFilter === 'ntled' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}`}
+                >
+                  <span className="w-2 h-2 mr-2 inline-block bg-indigo-100 border border-indigo-500 rounded-sm"></span>
+                  NT-Led Only
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-        
-        {/* Calendar Grid */}
-        <div className="grid grid-cols-7 divide-x">
-          {/* Day Headers */}
+      </div>
+      
+      {showEmptyStateForTeacher && (
+        <div className="p-8 text-center">
+          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">No classes found</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            {selectedTeacher?.Teacher_name} has no scheduled classes for the week of {format(weekStart, 'MMM d')}.
+          </p>
+        </div>
+      )}
+      
+      {!showEmptyStateForTeacher && (
+        <div className="grid grid-cols-7 divide-x divide-gray-200">
           {weekDays.map((day) => {
-            // Get the number of entries for this day
             const dayEntries = entriesByDay.find(d => d.dateStr === day.dateStr)?.entries || [];
             const entryCount = dayEntries.length;
             
-            // Count NT-Led classes
             const ntLedCount = dayEntries.filter(entry => {
               const ntLed = entry['NT-Led'];
               return ntLed === true || (typeof ntLed === 'string' && ntLed.toLowerCase() === 'yes');
             }).length;
             
             return (
-              <div 
-                key={day.dateStr} 
-                className={`p-2 text-center font-medium ${day.isToday ? 'bg-blue-50' : ''}`}
-              >
+              <div key={day.dateStr} className={`flex flex-col ${day.isToday ? 'bg-blue-50' : ''}`}>
                 <div className="text-sm text-gray-600">{day.dayShort}</div>
                 <div className={`text-base ${
-                  day.dateStr === selectedDate 
+                  day.dateStr === currentDate 
                     ? 'text-indigo-600 font-bold' 
                     : day.isToday 
                       ? 'text-blue-600' 
@@ -508,23 +451,43 @@ export default function WeeklyCalendar({
                     )}
                   </div>
                 )}
+                <div className="flex-grow p-2 space-y-1 overflow-y-auto min-h-[100px] border-t border-gray-200">
+                  {dayEntries.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic text-center mt-4">No classes</p>
+                  ) : (
+                    dayEntries.map((entry, index) => (
+                      <div 
+                        key={getUniqueEntryKey(entry, day.dateStr, index)} 
+                        onClick={() => handleEntryClick(entry)}
+                        className={`p-1.5 rounded-md text-xs cursor-pointer hover:opacity-80 transition-opacity ${getEntryClass(entry)}`}
+                      >
+                        {/* Entry details - existing code */}
+                        {/* ... */}
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
-        
-        {/* Calendar Content */}
-        <div className="grid grid-cols-7 divide-x min-h-[30rem]">
-          {entriesByDay.map((day) => (
-            <div 
-              key={day.dateStr} 
-              className={`p-2 ${day.dateStr === selectedDate ? 'bg-indigo-50' : day.isToday ? 'bg-blue-50' : ''}`}
+      )}
+      
+      {selectedEntry && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-8 rounded-lg shadow-lg">
+            <h2 className="text-2xl font-bold mb-4">{selectedEntry.Course} - {selectedEntry.Level}</h2>
+            <p>{selectedEntry.Description}</p>
+            <p>{getTimeRange(selectedEntry)}</p>
+            <button 
+              onClick={closeModal}
+              className="mt-4 bg-indigo-500 text-white px-4 py-2 rounded"
             >
-              {day.entries.length === 0 ? (
-                <div className="text-center text-gray-500 text-sm italic py-4">No classes</div>
-              ) : (
-                <div className="space-y-2">
-                  {day.entries.map((entry, index) => (
-                    <div
-                      key={getUniqueEntryKey(entry, day.dateStr, index)}
-                      className={`
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

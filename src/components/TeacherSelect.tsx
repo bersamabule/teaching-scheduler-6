@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { getTeachers } from '@/lib/supabase/data';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { getTeachers, CalendarEntry } from '@/lib/supabase/data';
 import { supabaseService } from '@/lib/supabase/service';
 import FallbackIndicator from './FallbackIndicator';
 import LoadingIndicator from './LoadingIndicator';
@@ -10,6 +10,7 @@ import SkeletonLoader from './SkeletonLoader';
 interface TeacherSelectProps {
   selectedTeacherId: number | null;
   onTeacherSelect: (teacherId: number | null) => void;
+  calendarEntries?: CalendarEntry[];
 }
 
 // Unique component ID for synchronization
@@ -26,7 +27,7 @@ const FALLBACK_TEACHERS = [
   { id: 7, name: 'Chen Jie', type: 'Local' }
 ];
 
-export default function TeacherSelect({ selectedTeacherId, onTeacherSelect }: TeacherSelectProps) {
+export default function TeacherSelect({ selectedTeacherId, onTeacherSelect, calendarEntries = [] }: TeacherSelectProps) {
   const [teachers, setTeachers] = useState<Array<{ id: number; name: string; type: string }>>(FALLBACK_TEACHERS);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -156,14 +157,46 @@ export default function TeacherSelect({ selectedTeacherId, onTeacherSelect }: Te
   // Find the selected teacher
   const selectedTeacher = teachers.find(teacher => teacher.id === selectedTeacherId);
   
+  // Calculate workload (class count) for each teacher based on provided entries
+  const teacherWorkloads = useMemo(() => {
+    const workloads: { [teacherId: number]: number } = {};
+    
+    // Initialize count for all loaded teachers
+    teachers.forEach(t => { workloads[t.id] = 0; });
+
+    calendarEntries.forEach(entry => {
+      const isNtLed = entry['NT-Led'] === true || String(entry['NT-Led']).toLowerCase() === 'true';
+      
+      if (isNtLed) {
+        // Assign NT-Led classes to Native teachers
+        teachers.forEach(teacher => {
+          if (teacher.type.toLowerCase() === 'native') {
+            workloads[teacher.id] = (workloads[teacher.id] || 0) + 1;
+          }
+        });
+      } else {
+        // Assign to specific teachers in Day1/Day2 if they exist in our list
+        [entry.Day1, entry.Day2].forEach(assignedTeacherName => {
+          const teacher = teachers.find(t => t.name === assignedTeacherName);
+          if (teacher) {
+            workloads[teacher.id] = (workloads[teacher.id] || 0) + 1;
+          }
+        });
+      }
+    });
+
+    return workloads;
+  }, [calendarEntries, teachers]);
+  
   // Filter teachers based on search query
-  const filteredTeachers = 
+  const filteredTeachers = useMemo(() => 
     searchQuery.trim() === ''
       ? teachers
       : teachers.filter(teacher => 
           teacher.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           teacher.type.toLowerCase().includes(searchQuery.toLowerCase())
-        );
+        )
+  , [teachers, searchQuery]);
   
   // Clear the selected teacher
   const clearSelection = () => {
@@ -205,126 +238,57 @@ export default function TeacherSelect({ selectedTeacherId, onTeacherSelect }: Te
         </div>
         
         {isOpen && (
-          <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b">
-              <div className="flex items-center p-1">
-                <input
-                  type="text"
-                  placeholder="Search teachers..."
-                  className="w-full px-2 py-1 text-xs border-none focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  autoFocus
-                />
-                {selectedTeacherId !== null && (
-                  <button
-                    className="flex-shrink-0 ml-1 px-1.5 py-0.5 text-[10px] bg-gray-100 hover:bg-gray-200 border rounded"
-                    onClick={clearSelection}
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
+          <div className="absolute z-10 mt-1 w-full bg-white shadow-lg max-h-60 rounded-md py-1 text-xs ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none">
+            <div className="px-2 py-1 sticky top-0 bg-white z-10">
+              <input
+                type="text"
+                placeholder="Search teachers..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+              />
             </div>
             
-            {isLoading ? (
-              <div className="p-2">
-                <SkeletonLoader type="list" count={5} height="h-6" />
-              </div>
-            ) : filteredTeachers.length === 0 ? (
-              <div className="p-2 text-center text-gray-500 text-xs">
-                No teachers found
-              </div>
+            <button
+              onClick={clearSelection}
+              className="block w-full px-3 py-1.5 text-left text-red-600 hover:bg-red-50"
+            >
+              -- Clear Selection --
+            </button>
+
+            {filteredTeachers.length === 0 ? (
+              <div className="px-3 py-1.5 text-gray-500 italic">No teachers found.</div>
             ) : (
-              <div className="max-h-48 overflow-y-auto p-1">
-                {/* Native Teachers */}
-                {filteredTeachers.some(t => t.type.toLowerCase() === 'native') && (
-                  <div>
-                    <div className="px-2 py-1 text-[10px] font-medium text-gray-500 bg-gray-50 rounded-sm">
-                      Native Teachers
+              filteredTeachers.map((teacher) => {
+                const isSelected = teacher.id === selectedTeacherId;
+                const workload = teacherWorkloads[teacher.id] || 0;
+
+                return (
+                  <button
+                    key={teacher.id}
+                    onClick={() => {
+                      onTeacherSelect(teacher.id);
+                      setIsOpen(false);
+                      setSearchQuery('');
+                    }}
+                    className={`
+                      block w-full text-left px-3 py-1.5 flex justify-between items-center
+                      ${isSelected ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-50'}
+                    `}
+                  >
+                    <div>
+                      <span className={isSelected ? 'font-semibold' : ''}>{teacher.name}</span>
+                      <span className={`ml-2 text-xs ${isSelected ? 'text-indigo-500' : 'text-gray-400'}`}>({teacher.type})</span>
                     </div>
-                    {filteredTeachers
-                      .filter(t => t.type.toLowerCase() === 'native')
-                      .map(teacher => (
-                        <div 
-                          key={teacher.id}
-                          className={`px-2 py-1 text-xs cursor-pointer rounded-sm my-1 flex items-center ${
-                            selectedTeacherId === teacher.id 
-                              ? 'bg-indigo-100 text-indigo-800 font-medium' 
-                              : 'hover:bg-gray-50'
-                          }`}
-                          onClick={() => {
-                            onTeacherSelect(teacher.id);
-                            setIsOpen(false);
-                          }}
-                        >
-                          <span className="truncate flex-grow">{teacher.name}</span>
-                          <span className="ml-2 flex-shrink-0">
-                            <span className="inline-block w-2 h-2 rounded-full bg-indigo-500"></span>
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                )}
-                
-                {/* Local Teachers */}
-                {filteredTeachers.some(t => t.type.toLowerCase() === 'local') && (
-                  <div className="mt-2">
-                    <div className="px-2 py-1 text-[10px] font-medium text-gray-500 bg-gray-50 rounded-sm">
-                      Local Teachers
-                    </div>
-                    {filteredTeachers
-                      .filter(t => t.type.toLowerCase() === 'local')
-                      .map(teacher => (
-                        <div 
-                          key={teacher.id}
-                          className={`px-2 py-1 text-xs cursor-pointer rounded-sm my-1 flex items-center ${
-                            selectedTeacherId === teacher.id 
-                              ? 'bg-indigo-100 text-indigo-800 font-medium' 
-                              : 'hover:bg-gray-50'
-                          }`}
-                          onClick={() => {
-                            onTeacherSelect(teacher.id);
-                            setIsOpen(false);
-                          }}
-                        >
-                          <span className="truncate flex-grow">{teacher.name}</span>
-                          <span className="ml-2 flex-shrink-0">
-                            <span className="inline-block w-2 h-2 rounded-full bg-green-500"></span>
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                )}
-                
-                {/* Others */}
-                {filteredTeachers.some(t => t.type.toLowerCase() !== 'native' && t.type.toLowerCase() !== 'local') && (
-                  <div className="mt-2">
-                    <div className="px-2 py-1 text-[10px] font-medium text-gray-500 bg-gray-50 rounded-sm">
-                      Other Teachers
-                    </div>
-                    {filteredTeachers
-                      .filter(t => t.type.toLowerCase() !== 'native' && t.type.toLowerCase() !== 'local')
-                      .map(teacher => (
-                        <div 
-                          key={teacher.id}
-                          className={`px-2 py-1 text-xs cursor-pointer rounded-sm my-1 flex items-center ${
-                            selectedTeacherId === teacher.id 
-                              ? 'bg-indigo-100 text-indigo-800 font-medium' 
-                              : 'hover:bg-gray-50'
-                          }`}
-                          onClick={() => {
-                            onTeacherSelect(teacher.id);
-                            setIsOpen(false);
-                          }}
-                        >
-                          <span className="truncate flex-grow">{teacher.name}</span>
-                          <span className="ml-2 text-[10px] text-gray-500">{teacher.type}</span>
-                        </div>
-                      ))}
-                  </div>
-                )}
-              </div>
+                    <span 
+                      className={`text-xs px-1.5 py-0.5 rounded ${isSelected ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-500'}`}
+                      title={`${workload} classes this week`}
+                    >
+                      {workload}
+                    </span>
+                  </button>
+                );
+              })
             )}
           </div>
         )}
